@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+
+	"github.com/MadonnaMat/go-rag-lab/internal/chunk"
 )
 
 type Config struct {
@@ -30,6 +32,10 @@ func Load() (Config, error) {
 	chunkOverlap, err := getIntEnv("CHUNK_OVERLAP", 200)
 	if err != nil {
 		return Config{}, err
+	}
+
+	if err := chunk.ValidateParams(chunkSize, chunkOverlap); err != nil {
+		return Config{}, fmt.Errorf("invalid chunk config: %w", err)
 	}
 
 	return Config{
