@@ -48,6 +48,11 @@ for arg in "$@"; do
   esac
 done
 
+if $STOP && ! $DAEMON; then
+  echo "\`stop\` only applies to daemon mode — run \`scripts/ollama-dev --daemon stop\` instead." >&2
+  exit 1
+fi
+
 command_exists() { command -v "$1" >/dev/null 2>&1; }
 
 ollama_reachable() { curl -fsS -o /dev/null "$OLLAMA_URL" 2>/dev/null; }
@@ -62,7 +67,12 @@ wait_until_reachable() {
 ensure_model_pulled() {
   echo
   echo "== Ensuring $OLLAMA_EMBED_MODEL is pulled =="
-  if curl -fsS "$OLLAMA_URL/api/tags" | grep -q "\"name\":\"${OLLAMA_EMBED_MODEL}\(:[^\"]*\)\?\""; then
+  # Escape BRE metacharacters in the model name before it goes into a grep
+  # pattern — Ollama model names commonly contain '.' (e.g. "llama3.1"),
+  # which would otherwise match any character and could false-positive
+  # against a different pulled model.
+  escaped_model=$(printf '%s' "$OLLAMA_EMBED_MODEL" | sed 's/[.[\*^$]/\\&/g')
+  if curl -fsS "$OLLAMA_URL/api/tags" | grep -q "\"name\":\"${escaped_model}\(:[^\"]*\)\?\""; then
     echo "$OLLAMA_EMBED_MODEL already pulled."
   else
     ollama pull "$OLLAMA_EMBED_MODEL"
@@ -78,7 +88,7 @@ smoke_test() {
   echo
 }
 
-if $DAEMON && $STOP; then
+if $STOP; then
   command_exists systemctl || { echo "No systemd available to stop the service." >&2; exit 1; }
   if systemctl is-active --quiet ollama; then
     echo "Stopping the Ollama service..."
