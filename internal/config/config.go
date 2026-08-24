@@ -42,9 +42,12 @@ func Load() (Config, error) {
 		DatabaseURL:       getEnv("DATABASE_URL", "postgres://rag:rag@localhost:5432/rag?sslmode=disable"),
 		EmbeddingProvider: getEnv("EMBEDDING_PROVIDER", "ollama"),
 		OllamaURL:         getEnv("OLLAMA_URL", "http://localhost:11434"),
-		OllamaEmbedModel:  getEnv("OLLAMA_EMBED_MODEL", "nomic-embed-text"),
-		ChunkSize:         chunkSize,
-		ChunkOverlap:      chunkOverlap,
+		// Default must stay in sync with internal/store/schema.sql's
+		// vector(768) column width and docker/ollama-ci/Dockerfile's
+		// pre-baked model — see schema.sql's comment for why.
+		OllamaEmbedModel: getEnv("OLLAMA_EMBED_MODEL", "nomic-embed-text"),
+		ChunkSize:        chunkSize,
+		ChunkOverlap:     chunkOverlap,
 	}, nil
 }
 
