@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 
 	"github.com/MadonnaMat/go-rag-lab/internal/chunk"
 	"github.com/MadonnaMat/go-rag-lab/internal/embedding"
@@ -41,8 +40,9 @@ type Result struct {
 
 // IngestDir reads every regular file directly inside dir (non-recursive),
 // chunks and embeds each one, and upserts it into the store. Documents are
-// processed in a fixed (sorted-by-name) order so output and error messages
-// are reproducible between runs.
+// processed in a fixed (sorted-by-name) order — os.ReadDir already
+// guarantees this — so output and error messages are reproducible between
+// runs.
 func (ing *Ingester) IngestDir(ctx context.Context, dir string) (Result, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -55,7 +55,6 @@ func (ing *Ingester) IngestDir(ctx context.Context, dir string) (Result, error) 
 			names = append(names, e.Name())
 		}
 	}
-	sort.Strings(names)
 
 	var result Result
 	for _, name := range names {
@@ -77,6 +76,12 @@ func (ing *Ingester) IngestDir(ctx context.Context, dir string) (Result, error) 
 // -dir=/app/sample_docs), and document identity must stay stable across
 // all of them so re-ingesting the same file replaces its chunks instead of
 // duplicating them under a second, differently-prefixed path.
+//
+// This is only correct because IngestDir is non-recursive: if it ever
+// walks subdirectories, bare-filename identity must become a path relative
+// to dir (e.g. via filepath.Rel(dir, diskPath)) instead — otherwise two
+// same-named files in different subdirectories would silently collide
+// under ON CONFLICT (path), one overwriting the other with no error.
 func (ing *Ingester) ingestFile(ctx context.Context, diskPath, identity string) (int, error) {
 	content, err := os.ReadFile(diskPath)
 	if err != nil {
