@@ -34,13 +34,11 @@ down:
 ingest:
 	@set -a; [ -f .env ] && . ./.env; set +a; go run ./cmd/ingest -dir=sample_docs
 
-# CI only: brings up db + the pre-baked CI-only Ollama (see
-# docker/ollama-ci/Dockerfile) as real services, then builds and runs the
-# app service against them for real — proves the Dockerfile builds *and*
-# the containerized app actually works end-to-end (reaches db by compose
-# service name, reaches ollama for real embeddings, lands rows). Not run
-# by `make up` — local dev keeps using host-installed Ollama for GPU
-# access instead (see CLAUDE.md).
+# CI only: see scripts/ci-verify — brings up db + the pre-baked CI-only
+# Ollama, runs the containerized app service against them twice, and
+# asserts on the resulting database state directly (not just the exit
+# code) — including that a re-run replaces rows rather than duplicating
+# them. Not run by `make up` — local dev keeps using host-installed Ollama
+# for GPU access instead (see CLAUDE.md).
 ci-verify:
-	docker compose up -d --wait db ollama
-	OLLAMA_URL=http://ollama:11434 docker compose up --build app
+	./scripts/ci-verify
