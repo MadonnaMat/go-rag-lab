@@ -10,11 +10,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
-      # Same variable name make test reads locally (from .env). No .env
-      # file exists in CI, so its `[ -f .env ] && . ./.env` sourcing line
-      # is a harmless no-op here — TEST_DATABASE_URL comes from this
-      # workflow env block instead, and `make test` behaves identically
-      # either way.
+      # Same variable name make test reads locally (via the Makefile's
+      # `include .env`). No .env file exists in CI, so that include is a
+      # harmless no-op here — TEST_DATABASE_URL comes from this workflow
+      # env block instead, and `make test` behaves identically either way.
       TEST_DATABASE_URL: postgres://rag:rag@localhost:5432/rag_test?sslmode=disable
     steps:
       - uses: actions/checkout@v6

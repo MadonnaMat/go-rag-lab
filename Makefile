@@ -1,5 +1,13 @@
 .PHONY: build vet fmt fmt-check lint test test-unit up down ingest ci-verify
 
+# Loads .env (if present) as real Make variables, exported to every
+# recipe's environment — a single source instead of each target having to
+# source .env itself in its own shell.
+ifneq (,$(wildcard .env))
+include .env
+export
+endif
+
 build:
 	go build ./...
 
@@ -19,11 +27,11 @@ lint: fmt-check vet
 test-unit:
 	DATABASE_URL= go test ./... -v
 
-# Full suite: sources .env for TEST_DATABASE_URL, then runs tests against
-# it (as DATABASE_URL) rather than dev's DATABASE_URL — so DB-gated tests
-# never touch real ingested documents. Requires `make up` running.
+# Full suite: runs tests against TEST_DATABASE_URL (as DATABASE_URL)
+# rather than dev's DATABASE_URL — so DB-gated tests never touch real
+# ingested documents. Requires `make up` running.
 test:
-	@set -a; [ -f .env ] && . ./.env; set +a; DATABASE_URL="$$TEST_DATABASE_URL" go test ./... -v
+	DATABASE_URL="$(TEST_DATABASE_URL)" go test ./... -v
 
 up:
 	docker compose up -d --wait db
@@ -32,7 +40,7 @@ down:
 	docker compose down
 
 ingest:
-	@set -a; [ -f .env ] && . ./.env; set +a; go run ./cmd/ingest -dir=sample_docs
+	go run ./cmd/ingest -dir=sample_docs
 
 # CI only: see scripts/ci-verify — brings up db + the pre-baked CI-only
 # Ollama, runs the containerized app service against them twice, and
