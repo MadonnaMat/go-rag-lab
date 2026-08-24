@@ -1,0 +1,146 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Installs Ollama and the embedding model this project's Provider talks to
+# (see internal/embedding/ollama.go), then makes sure it's running.
+# Idempotent — safe to re-run any time, e.g. after a fresh machine setup or
+# to confirm the local embedding server is still healthy.
+#
+# Two run modes:
+#   scripts/ollama-dev          Foreground mode (default): stops the
+#                                systemd service if it's active, then runs
+#                                `ollama serve` itself so its logs stream
+#                                to this terminal and Ctrl-C stops it.
+#   scripts/ollama-dev --daemon Daemon mode: ensures the systemd-managed
+#                                service is installed, enabled, and
+#                                running, then exits — Ollama keeps
+#                                running in the background.
+#   scripts/ollama-dev --daemon stop
+#                                Stops the background systemd service.
+#
+# Installing Ollama (and stopping/starting the systemd service) needs your
+# sudo password interactively — run this script directly in your own
+# terminal, not through a tool that can't supply one.
+#
+# Named ollama-dev, not ollama, deliberately: if this project's scripts/
+# directory ever ends up on PATH ahead of /usr/local/bin (common in
+# Rails-style dev setups), a script literally named `ollama` would shadow
+# the real CLI binary and recursively invoke itself wherever this script
+# calls out to `ollama`.
+#
+# The systemd service runs Ollama as its own dedicated `ollama` system
+# user (see `systemctl cat ollama`), which stores pulled models under
+# *that* user's home directory — entirely separate from
+# ~/.ollama/models under whichever user runs foreground mode. Daemon and
+# foreground mode are therefore backed by two independent model stores:
+# switching modes for the first time re-pulls the model into whichever
+# store is now in use, even if the other one already has it.
+
+OLLAMA_URL="${OLLAMA_URL:-http://localhost:11434}"
+OLLAMA_EMBED_MODEL="${OLLAMA_EMBED_MODEL:-nomic-embed-text}"
+
+DAEMON=false
+STOP=false
+for arg in "$@"; do
+  case "$arg" in
+    --daemon) DAEMON=true ;;
+    stop) STOP=true ;;
+  esac
+done
+
+command_exists() { command -v "$1" >/dev/null 2>&1; }
+
+ollama_reachable() { curl -fsS -o /dev/null "$OLLAMA_URL" 2>/dev/null; }
+
+wait_until_reachable() {
+  until ollama_reachable; do sleep 1; done
+}
+
+# Talks to whichever Ollama server is currently reachable at OLLAMA_URL —
+# callers are responsible for making sure that's the right one (daemon vs.
+# foreground mode have independent model stores; see header).
+ensure_model_pulled() {
+  echo
+  echo "== Ensuring $OLLAMA_EMBED_MODEL is pulled =="
+  if curl -fsS "$OLLAMA_URL/api/tags" | grep -q "\"name\":\"${OLLAMA_EMBED_MODEL}\(:[^\"]*\)\?\""; then
+    echo "$OLLAMA_EMBED_MODEL already pulled."
+  else
+    ollama pull "$OLLAMA_EMBED_MODEL"
+  fi
+}
+
+smoke_test() {
+  echo
+  echo "== Smoke test: POST $OLLAMA_URL/api/embed =="
+  curl -fsS -X POST "$OLLAMA_URL/api/embed" \
+    -H "Content-Type: application/json" \
+    -d "{\"model\":\"$OLLAMA_EMBED_MODEL\",\"input\":\"Hello, RAG lab!\"}"
+  echo
+}
+
+if $DAEMON && $STOP; then
+  command_exists systemctl || { echo "No systemd available to stop the service." >&2; exit 1; }
+  if systemctl is-active --quiet ollama; then
+    echo "Stopping the Ollama service..."
+    sudo systemctl stop ollama
+    echo "Stopped."
+  else
+    echo "Ollama service is not running."
+  fi
+  exit 0
+fi
+
+if ! command_exists ollama; then
+  echo "== Installing Ollama (needs your sudo password) =="
+  curl -fsSL https://ollama.com/install.sh | sh
+fi
+
+if $DAEMON; then
+  if ! ollama_reachable; then
+    command_exists systemctl || {
+      echo "Ollama isn't reachable at $OLLAMA_URL and no systemd is available to start it — run \`ollama serve\` yourself in another terminal and re-run this script." >&2
+      exit 1
+    }
+    echo "== Starting the Ollama service =="
+    sudo systemctl enable --now ollama
+    wait_until_reachable
+  fi
+
+  ensure_model_pulled
+  smoke_test
+
+  if command_exists nvidia-smi; then
+    echo
+    echo "== GPU memory (confirm the model loaded onto GPU, not CPU) =="
+    nvidia-smi --query-gpu=memory.used,memory.total,utilization.gpu --format=csv
+  fi
+
+  echo
+  echo "Ollama setup OK — $OLLAMA_EMBED_MODEL is pulled and serving at $OLLAMA_URL."
+  echo "Run with no flags (or --foreground) any time to take over the terminal and watch live Ollama logs (Ctrl-C to stop)."
+else
+  echo
+  echo "== Switching to foreground mode =="
+  if command_exists systemctl && systemctl is-active --quiet ollama; then
+    echo "Stopping the background systemd service (Ctrl-C will stop this run instead)..."
+    sudo systemctl stop ollama
+  fi
+
+  echo "Starting \`ollama serve\` in the foreground — Ctrl-C to stop."
+  echo
+
+  # Spawned in the background (not exec'd) so the model-pull check below
+  # can run once this specific instance is reachable — it needs its own
+  # pull/check pass since it's backed by a different model store than the
+  # systemd daemon (see header). trap forwards Ctrl-C to it.
+  ollama serve &
+  pid=$!
+  trap 'kill "$pid" 2>/dev/null' INT TERM
+
+  wait_until_reachable
+  ensure_model_pulled
+  smoke_test
+  echo
+
+  wait "$pid"
+fi
