@@ -91,10 +91,12 @@ in `.env.example`.
 ## CI
 
 GitHub Actions (`.github/workflows/ci.yml`) runs `make build`, `make lint`,
-and `make test` on every push/PR, using the exact same Makefile targets
-described above (backed by a `pgvector/pgvector:pg17` service container).
-No Ollama in CI — embedding-provider tests mock Ollama's HTTP API via
-`httptest`, so nothing live is required.
+`make test`, and `make ci-verify` on every push/PR, using the exact same
+Makefile targets described above (backed by a `pgvector/pgvector:pg17`
+service container). `make test`'s embedding-provider tests mock Ollama's
+HTTP API via `httptest`, so they need nothing live — but the separate
+`make ci-verify` step does bring up a real, pre-baked CI-only Ollama image
+(see `CLAUDE.md`) and runs actual embedding calls against it end-to-end.
 
 ## Roadmap
 

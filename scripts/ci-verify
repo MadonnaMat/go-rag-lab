@@ -18,7 +18,9 @@ sql_count() {
 }
 
 run_ingest() {
-  OLLAMA_URL=http://ollama:11434 docker compose up --build app
+  # --exit-code-from makes `up`'s own exit status match app's, instead of
+  # always returning 0 regardless of how the container actually exited.
+  OLLAMA_URL=http://ollama:11434 docker compose up --build --exit-code-from app app
 }
 
 echo "== First ingestion run =="
