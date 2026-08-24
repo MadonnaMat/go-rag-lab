@@ -40,7 +40,13 @@ func newFakeStore() *fakeStore {
 	}
 }
 
+// UpsertDocument mirrors store.Store's real ON CONFLICT (path) DO UPDATE
+// ... RETURNING id behavior: a path already seen gets back its existing id,
+// not a new one.
 func (f *fakeStore) UpsertDocument(ctx context.Context, path, contentHash string) (int64, error) {
+	if id, ok := f.documents[path]; ok {
+		return id, nil
+	}
 	f.nextID++
 	f.documents[path] = f.nextID
 	return f.nextID, nil
@@ -104,6 +110,37 @@ func TestIngestDir(t *testing.T) {
 	}
 	if aChunks[0].Index != 0 || aChunks[1].Index != 1 {
 		t.Errorf("a.md chunk indexes = %d, %d, want 0, 1", aChunks[0].Index, aChunks[1].Index)
+	}
+}
+
+func TestIngestDir_ReingestSamePathReusesDocumentID(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "doc.md", "hello world")
+
+	st := newFakeStore()
+	ing := &Ingester{Store: st, Provider: &fakeProvider{}, ChunkSize: 100, ChunkOverlap: 0}
+
+	if _, err := ing.IngestDir(context.Background(), dir); err != nil {
+		t.Fatalf("first IngestDir returned error: %v", err)
+	}
+	firstID, ok := st.documents["doc.md"]
+	if !ok {
+		t.Fatal("doc.md was never upserted on first run")
+	}
+
+	if _, err := ing.IngestDir(context.Background(), dir); err != nil {
+		t.Fatalf("second IngestDir returned error: %v", err)
+	}
+	secondID, ok := st.documents["doc.md"]
+	if !ok {
+		t.Fatal("doc.md was never upserted on second run")
+	}
+
+	if secondID != firstID {
+		t.Errorf("document id changed across re-ingestion: %d -> %d, want it to stay stable (matches ON CONFLICT ... RETURNING id)", firstID, secondID)
+	}
+	if len(st.documents) != 1 {
+		t.Errorf("documents map has %d entries after re-ingesting the same path, want 1", len(st.documents))
 	}
 }
 
