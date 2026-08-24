@@ -54,6 +54,19 @@ EXPOSE 11434
 ENTRYPOINT ["/usr/bin/ollama"]
 CMD ["serve"]
 
-RUN ollama serve & \
+# curl is installed and removed within this single RUN so it leaves no
+# trace in the final image layer — it's only needed to prove the embed
+# codepath actually works at build time. `ollama pull` alone only proves
+# the server starts and the weights download; it never exercises
+# inference, so a CPU backend lib missing only for embedding (as opposed
+# to server startup) would otherwise go unnoticed until a real consumer
+# (e.g. `make ci-verify`) hits it later.
+RUN apt-get update && apt-get install -y --no-install-recommends curl && \
+    ollama serve & \
     for i in $(seq 1 60); do ollama list >/dev/null 2>&1 && break; sleep 1; done && \
-    ollama pull nomic-embed-text
+    ollama pull nomic-embed-text && \
+    curl -fsS -X POST http://localhost:11434/api/embed \
+      -H "Content-Type: application/json" \
+      -d '{"model":"nomic-embed-text","input":"build-time smoke test"}' \
+      | grep -q '"embeddings"' && \
+    apt-get purge -y curl && apt-get autoremove -y && apt-get clean && rm -rf /var/lib/apt/lists/*
