@@ -1,4 +1,4 @@
-.PHONY: build vet fmt fmt-check lint test test-unit up down ingest
+.PHONY: build vet fmt fmt-check lint test test-unit up down ingest docker-build
 
 build:
 	go build ./...
@@ -33,3 +33,11 @@ down:
 
 ingest:
 	@set -a; [ -f .env ] && . ./.env; set +a; go run ./cmd/ingest -dir=sample_docs
+
+# Verifies the Dockerfile itself still builds — CI runs this so a broken
+# Dockerfile (bad COPY path, bad build-stage reference) fails the build
+# rather than going unnoticed, since the Go build/test steps never touch
+# it. Doesn't run the resulting image — that needs live Ollama, which CI
+# deliberately doesn't have (see internal/embedding's httptest-only tests).
+docker-build:
+	docker build -t go-rag-lab .
