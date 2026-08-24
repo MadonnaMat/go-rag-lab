@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# CI only, called by `make ci-verify`. Brings up db + the pre-baked
+# CI-only Ollama (docker/ollama-ci), then runs the containerized app
+# service against them twice, asserting on the resulting database state
+# directly each time — not just that the container exited 0. Confirms
+# real rows land, and that re-running replaces them rather than
+# duplicating them.
+
+POSTGRES_USER="${POSTGRES_USER:-rag}"
+POSTGRES_DB="${POSTGRES_DB:-rag}"
+
+docker compose up -d --wait db ollama
+
+sql_count() {
+  docker compose exec -T db psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "SELECT count(*) FROM $1;"
+}
+
+run_ingest() {
+  # --exit-code-from makes `up`'s own exit status match app's, instead of
+  # always returning 0 regardless of how the container actually exited.
+  OLLAMA_URL=http://ollama:11434 docker compose up --build --exit-code-from app app
+}
+
+echo "== First ingestion run =="
+run_ingest
+docs1=$(sql_count documents)
+chunks1=$(sql_count chunks)
+echo "documents=$docs1 chunks=$chunks1"
+
+if [ "$docs1" -eq 0 ] || [ "$chunks1" -eq 0 ]; then
+  echo "FAIL: ingestion produced zero documents/chunks" >&2
+  exit 1
+fi
+
+echo
+echo "== Second ingestion run (idempotency check) =="
+run_ingest
+docs2=$(sql_count documents)
+chunks2=$(sql_count chunks)
+echo "documents=$docs2 chunks=$chunks2"
+
+if [ "$docs2" -ne "$docs1" ] || [ "$chunks2" -ne "$chunks1" ]; then
+  echo "FAIL: re-running ingestion changed row counts (documents $docs1 -> $docs2, chunks $chunks1 -> $chunks2) — should replace existing rows, not duplicate them" >&2
+  exit 1
+fi
+
+echo
+echo "OK: containerized ingestion produced $docs1 documents / $chunks1 chunks, stable across a re-run"

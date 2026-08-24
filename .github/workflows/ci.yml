@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      # Same variable name make test reads locally (via the Makefile's
+      # `include .env`). No .env file exists in CI, so that include is a
+      # harmless no-op here — TEST_DATABASE_URL comes from this workflow
+      # env block instead, and `make test` behaves identically either way.
+      TEST_DATABASE_URL: postgres://rag:rag@localhost:5432/rag_test?sslmode=disable
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Download dependencies
+        run: go mod download
+      - name: Build
+        run: make build
+      - name: Lint (gofmt + go vet)
+        run: make lint
+      # db comes from our own docker-compose.yml (not a separate GH Actions
+      # `services:` block) — one definition of the Postgres+pgvector setup,
+      # not two that could drift apart.
+      - name: Start Postgres+pgvector
+        run: make up
+      - name: Test
+        run: make test
+      # Brings up the pre-baked CI-only Ollama alongside db, then builds
+      # and runs the app service against them for real — a stronger check
+      # than a bare `docker build`, since it proves the image both builds
+      # and works end-to-end (reaches db and ollama, lands real rows).
+      - name: Docker compose integration (db + ollama + app)
+        run: make ci-verify
