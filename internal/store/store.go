@@ -102,11 +102,11 @@ func (s *Store) ReplaceChunks(ctx context.Context, documentID int64, chunks []Ch
 	}
 	defer tx.Rollback(ctx) // no-op once committed below
 
-	if _, err := tx.Exec(ctx, `DELETE FROM chunks WHERE document_id = $1`, documentID); err != nil {
-		return fmt.Errorf("delete existing chunks for document %d: %w", documentID, err)
-	}
-
+	// DELETE is queued as the batch's first statement, alongside the
+	// inserts, so it pipelines in the same round trip instead of waiting
+	// on its own reply before the inserts are even sent.
 	batch := &pgx.Batch{}
+	batch.Queue(`DELETE FROM chunks WHERE document_id = $1`, documentID)
 	const insert = `
 		INSERT INTO chunks (document_id, chunk_index, content, embedding)
 		VALUES ($1, $2, $3, $4)`
@@ -114,17 +114,19 @@ func (s *Store) ReplaceChunks(ctx context.Context, documentID int64, chunks []Ch
 		batch.Queue(insert, documentID, c.Index, c.Content, pgvector.NewVector(c.Embedding))
 	}
 
-	if batch.Len() > 0 {
-		results := tx.SendBatch(ctx, batch)
-		for range chunks {
-			if _, err := results.Exec(); err != nil {
-				_ = results.Close()
-				return fmt.Errorf("insert chunk for document %d: %w", documentID, err)
-			}
+	results := tx.SendBatch(ctx, batch)
+	if _, err := results.Exec(); err != nil {
+		_ = results.Close()
+		return fmt.Errorf("delete existing chunks for document %d: %w", documentID, err)
+	}
+	for range chunks {
+		if _, err := results.Exec(); err != nil {
+			_ = results.Close()
+			return fmt.Errorf("insert chunk for document %d: %w", documentID, err)
 		}
-		if err := results.Close(); err != nil {
-			return fmt.Errorf("close batch insert for document %d: %w", documentID, err)
-		}
+	}
+	if err := results.Close(); err != nil {
+		return fmt.Errorf("close batch replace for document %d: %w", documentID, err)
 	}
 
 	if err := tx.Commit(ctx); err != nil {
