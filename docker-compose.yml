@@ -16,6 +16,24 @@ services:
       timeout: 5s
       retries: 10
 
+  # CI-only: a pre-baked Ollama with nomic-embed-text already pulled (see
+  # docker/ollama-ci/Dockerfile), published to ghcr.io/madonnamat/
+  # go-rag-lab-ollama-ci. Not started by local `make up` / `docker compose
+  # up app` — local dev keeps using host-installed Ollama for GPU access
+  # (see CLAUDE.md). CI starts this explicitly (`make ci-verify`) and
+  # overrides app's OLLAMA_URL to point at it instead of host.docker.internal.
+  ollama:
+    image: ghcr.io/madonnamat/go-rag-lab-ollama-ci:latest
+    ports:
+      - "${OLLAMA_PORT:-11434}:11434"
+    healthcheck:
+      # No curl/wget in the base image, but the `ollama` CLI is — `list`
+      # only succeeds once the server is actually responding.
+      test: ["CMD", "ollama", "list"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
   app:
     build: .
     depends_on:
@@ -28,7 +46,10 @@ services:
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-rag}:${POSTGRES_PASSWORD:-rag}@db:5432/${POSTGRES_DB:-rag}?sslmode=disable
       EMBEDDING_PROVIDER: ollama
-      OLLAMA_URL: http://host.docker.internal:11434
+      # Local dev: host-installed Ollama via host.docker.internal (default
+      # below). CI overrides this to http://ollama:11434 — the service
+      # above, reached by its compose network name.
+      OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
       OLLAMA_EMBED_MODEL: ${OLLAMA_EMBED_MODEL:-nomic-embed-text}
     volumes:
       - ./sample_docs:/app/sample_docs:ro
