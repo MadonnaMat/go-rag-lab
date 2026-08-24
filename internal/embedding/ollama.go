@@ -7,7 +7,13 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"time"
 )
+
+// embedTimeout bounds a single Embed HTTP call so a stuck Ollama server
+// (still loading a model, a wedged GPU driver, a dead host.docker.internal
+// route) fails loudly instead of hanging ingestion forever.
+const embedTimeout = 90 * time.Second
 
 // Ollama implements Provider against a local Ollama server's batch
 // embeddings endpoint.
@@ -24,7 +30,7 @@ func NewOllama(baseURL, model string) *Ollama {
 	return &Ollama{
 		baseURL:    baseURL,
 		model:      model,
-		httpClient: &http.Client{},
+		httpClient: &http.Client{Timeout: embedTimeout},
 	}
 }
 
