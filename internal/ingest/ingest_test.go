@@ -87,7 +87,10 @@ func TestIngestDir(t *testing.T) {
 		t.Errorf("first Embed call got %d texts, want 2 (a.md's chunks)", len(provider.calls[0]))
 	}
 
-	aID, ok := st.documents[filepath.Join(dir, "a.md")]
+	// Stored under its filename alone, not the full disk path — see the
+	// comment on ingestFile for why (the same file must resolve to the
+	// same identity whether ingested natively or from a container mount).
+	aID, ok := st.documents["a.md"]
 	if !ok {
 		t.Fatal("a.md was never upserted")
 	}

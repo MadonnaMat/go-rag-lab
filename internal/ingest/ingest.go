@@ -59,10 +59,10 @@ func (ing *Ingester) IngestDir(ctx context.Context, dir string) (Result, error) 
 
 	var result Result
 	for _, name := range names {
-		path := filepath.Join(dir, name)
-		n, err := ing.ingestFile(ctx, path)
+		diskPath := filepath.Join(dir, name)
+		n, err := ing.ingestFile(ctx, diskPath, name)
 		if err != nil {
-			return result, fmt.Errorf("ingest %q: %w", path, err)
+			return result, fmt.Errorf("ingest %q: %w", diskPath, err)
 		}
 		result.Documents++
 		result.Chunks += n
@@ -70,8 +70,15 @@ func (ing *Ingester) IngestDir(ctx context.Context, dir string) (Result, error) 
 	return result, nil
 }
 
-func (ing *Ingester) ingestFile(ctx context.Context, path string) (int, error) {
-	content, err := os.ReadFile(path)
+// ingestFile reads content from diskPath but stores it under identity, its
+// filename alone rather than the full path — dir may be an absolute path,
+// a relative one, or a container mount point that differs between
+// environments (compare running natively vs. the Dockerfile's
+// -dir=/app/sample_docs), and document identity must stay stable across
+// all of them so re-ingesting the same file replaces its chunks instead of
+// duplicating them under a second, differently-prefixed path.
+func (ing *Ingester) ingestFile(ctx context.Context, diskPath, identity string) (int, error) {
+	content, err := os.ReadFile(diskPath)
 	if err != nil {
 		return 0, fmt.Errorf("read file: %w", err)
 	}
@@ -97,7 +104,7 @@ func (ing *Ingester) ingestFile(ctx context.Context, path string) (int, error) {
 		return 0, fmt.Errorf("embedding provider returned %d vectors for %d chunks", len(embeddings), len(chunks))
 	}
 
-	docID, err := ing.Store.UpsertDocument(ctx, path, contentHash)
+	docID, err := ing.Store.UpsertDocument(ctx, identity, contentHash)
 	if err != nil {
 		return 0, fmt.Errorf("upsert document: %w", err)
 	}
