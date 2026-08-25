@@ -31,6 +31,17 @@ func TestLoad_RejectsInvalidChunkParams(t *testing.T) {
 	}
 }
 
+func TestLoad_RejectsInvalidTopK(t *testing.T) {
+	for _, topK := range []string{"0", "-1"} {
+		t.Run("TOP_K="+topK, func(t *testing.T) {
+			t.Setenv("TOP_K", topK)
+
+			_, err := Load()
+			require.Error(t, err, "TOP_K=%s should fail validation", topK)
+		})
+	}
+}
+
 func TestLoad_AcceptsValidChunkParams(t *testing.T) {
 	t.Setenv("CHUNK_SIZE", "800")
 	t.Setenv("CHUNK_OVERLAP", "100")

@@ -44,6 +44,13 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	// Same reasoning as chunk.ValidateParams above: reject a bad TOP_K up
+	// front, at config-load time, rather than letting it surface later as
+	// a confusing 500 from retrieve.Retriever.Query's own "topK must be
+	// positive" check on every default (top_k-omitted) request.
+	if topK <= 0 {
+		return Config{}, fmt.Errorf("TOP_K: must be positive, got %d", topK)
+	}
 
 	return Config{
 		DatabaseURL:       getEnv("DATABASE_URL", "postgres://rag:rag@localhost:5432/rag?sslmode=disable"),

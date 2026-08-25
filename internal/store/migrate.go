@@ -5,6 +5,7 @@ import (
 	"embed"
 	"errors"
 	"fmt"
+	"log"
 
 	"github.com/golang-migrate/migrate/v4"
 	pgx5migrate "github.com/golang-migrate/migrate/v4/database/pgx/v5"
@@ -59,6 +60,8 @@ func MigrateUp(databaseURL string) error {
 	if err != nil {
 		return err
 	}
+	defer closeMigrate(m)
+
 	if err := m.Up(); err != nil && !errors.Is(err, migrate.ErrNoChange) {
 		return fmt.Errorf("apply migrations: %w", err)
 	}
@@ -72,8 +75,23 @@ func MigrateDown(databaseURL string) error {
 	if err != nil {
 		return err
 	}
+	defer closeMigrate(m)
+
 	if err := m.Steps(-1); err != nil && !errors.Is(err, migrate.ErrNoChange) {
 		return fmt.Errorf("roll back migration: %w", err)
 	}
 	return nil
+}
+
+// closeMigrate releases the database/sql connection newMigrate opened (the
+// docstring on newMigrate promises this happens "once the migration run is
+// done" — without this, every MigrateUp/MigrateDown call leaked a
+// database/sql connection pool for the life of the process). Close errors
+// are logged rather than returned: they'd otherwise mask (or be masked by)
+// the actual migration result, and there's nothing a caller could usefully
+// do differently with them.
+func closeMigrate(m *migrate.Migrate) {
+	if srcErr, dbErr := m.Close(); srcErr != nil || dbErr != nil {
+		log.Printf("close migrator: source error: %v, database error: %v", srcErr, dbErr)
+	}
 }
