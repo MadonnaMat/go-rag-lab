@@ -3,6 +3,9 @@ package config
 import (
 	"os"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestLoad_RejectsInvalidChunkParams(t *testing.T) {
@@ -22,9 +25,19 @@ func TestLoad_RejectsInvalidChunkParams(t *testing.T) {
 			t.Setenv("CHUNK_SIZE", tc.chunkSize)
 			t.Setenv("CHUNK_OVERLAP", tc.chunkOverlap)
 
-			if _, err := Load(); err == nil {
-				t.Fatalf("Load() with CHUNK_SIZE=%s CHUNK_OVERLAP=%s returned nil error, want a validation error", tc.chunkSize, tc.chunkOverlap)
-			}
+			_, err := Load()
+			require.Error(t, err, "CHUNK_SIZE=%s CHUNK_OVERLAP=%s should fail validation", tc.chunkSize, tc.chunkOverlap)
+		})
+	}
+}
+
+func TestLoad_RejectsInvalidTopK(t *testing.T) {
+	for _, topK := range []string{"0", "-1"} {
+		t.Run("TOP_K="+topK, func(t *testing.T) {
+			t.Setenv("TOP_K", topK)
+
+			_, err := Load()
+			require.Error(t, err, "TOP_K=%s should fail validation", topK)
 		})
 	}
 }
@@ -34,29 +47,24 @@ func TestLoad_AcceptsValidChunkParams(t *testing.T) {
 	t.Setenv("CHUNK_OVERLAP", "100")
 
 	cfg, err := Load()
-	if err != nil {
-		t.Fatalf("Load() returned unexpected error: %v", err)
-	}
-	if cfg.ChunkSize != 800 || cfg.ChunkOverlap != 100 {
-		t.Errorf("ChunkSize/ChunkOverlap = %d/%d, want 800/100", cfg.ChunkSize, cfg.ChunkOverlap)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, 800, cfg.ChunkSize)
+	assert.Equal(t, 100, cfg.ChunkOverlap)
 }
 
 func TestLoad_DefaultsWhenUnset(t *testing.T) {
-	for _, key := range []string{"CHUNK_SIZE", "CHUNK_OVERLAP", "DATABASE_URL", "EMBEDDING_PROVIDER", "OLLAMA_URL", "OLLAMA_EMBED_MODEL"} {
-		if err := os.Unsetenv(key); err != nil {
-			t.Fatalf("unset %s: %v", key, err)
-		}
+	for _, key := range []string{
+		"CHUNK_SIZE", "CHUNK_OVERLAP", "DATABASE_URL", "EMBEDDING_PROVIDER",
+		"OLLAMA_URL", "OLLAMA_EMBED_MODEL", "SERVER_ADDR", "TOP_K",
+	} {
+		require.NoError(t, os.Unsetenv(key))
 	}
 
 	cfg, err := Load()
-	if err != nil {
-		t.Fatalf("Load() returned unexpected error: %v", err)
-	}
-	if cfg.ChunkSize != 1000 || cfg.ChunkOverlap != 200 {
-		t.Errorf("default ChunkSize/ChunkOverlap = %d/%d, want 1000/200", cfg.ChunkSize, cfg.ChunkOverlap)
-	}
-	if cfg.EmbeddingProvider != "ollama" {
-		t.Errorf("default EmbeddingProvider = %q, want %q", cfg.EmbeddingProvider, "ollama")
-	}
+	require.NoError(t, err)
+	assert.Equal(t, 1000, cfg.ChunkSize)
+	assert.Equal(t, 200, cfg.ChunkOverlap)
+	assert.Equal(t, "ollama", cfg.EmbeddingProvider)
+	assert.Equal(t, ":8080", cfg.ServerAddr)
+	assert.Equal(t, 5, cfg.TopK)
 }

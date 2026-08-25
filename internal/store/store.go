@@ -4,7 +4,6 @@ package store
 
 import (
 	"context"
-	_ "embed"
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
@@ -12,14 +11,6 @@ import (
 	"github.com/pgvector/pgvector-go"
 	pgxvec "github.com/pgvector/pgvector-go/pgx"
 )
-
-// schemaSQL is the DDL in schema.sql, embedded into the compiled binary at
-// build time via go:embed so no separate SQL file needs to ship or be
-// mounted alongside the app — the schema-setup code path is identical
-// locally, in docker-compose, and in CI.
-//
-//go:embed schema.sql
-var schemaSQL string
 
 type Store struct {
 	pool *pgxpool.Pool
@@ -36,22 +27,14 @@ type Chunk struct {
 // every connection in the pool, so query args/results can use []float32
 // (via pgvector.NewVector) directly.
 //
-// This needs a two-step connect: pgxvec.RegisterTypes looks up the vector
-// type's OID, which only exists once the extension has been created. On a
-// brand-new database that hasn't happened yet, so a plain bootstrap
-// connection creates the extension first, before any pooled connection
-// (which registers types in AfterConnect below) is opened.
+// pgxvec.RegisterTypes looks up the vector type's OID, which only exists
+// once the vector extension has been created — Open assumes that, and the
+// rest of the schema, is already in place via `make migrate` /
+// `internal/store.MigrateUp` (see migrate.go). Unlike the old EnsureSchema,
+// there's no defensive "create it if missing" step here anymore: schema
+// setup is now the migration runner's job alone, run once, explicitly,
+// before the app ever calls Open.
 func Open(ctx context.Context, databaseURL string) (*Store, error) {
-	bootstrap, err := pgx.Connect(ctx, databaseURL)
-	if err != nil {
-		return nil, fmt.Errorf("connect to create vector extension: %w", err)
-	}
-	_, err = bootstrap.Exec(ctx, `CREATE EXTENSION IF NOT EXISTS vector`)
-	bootstrap.Close(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("create vector extension: %w", err)
-	}
-
 	cfg, err := pgxpool.ParseConfig(databaseURL)
 	if err != nil {
 		return nil, fmt.Errorf("parse database url: %w", err)
@@ -65,15 +48,6 @@ func Open(ctx context.Context, databaseURL string) (*Store, error) {
 		return nil, fmt.Errorf("open database pool: %w", err)
 	}
 	return &Store{pool: pool}, nil
-}
-
-// EnsureSchema creates the vector extension and tables if they don't
-// already exist. Safe to call every time the app starts.
-func (s *Store) EnsureSchema(ctx context.Context) error {
-	if _, err := s.pool.Exec(ctx, schemaSQL); err != nil {
-		return fmt.Errorf("ensure schema: %w", err)
-	}
-	return nil
 }
 
 // UpsertDocument inserts a document row, or updates its content_hash if a
@@ -90,6 +64,15 @@ func (s *Store) UpsertDocument(ctx context.Context, path, contentHash string) (i
 		return 0, fmt.Errorf("upsert document %q: %w", path, err)
 	}
 	return id, nil
+}
+
+// DeleteDocument deletes a document row, cascading to its chunks via the
+// chunks table's ON DELETE CASCADE foreign key.
+func (s *Store) DeleteDocument(ctx context.Context, path string) error {
+	if _, err := s.pool.Exec(ctx, `DELETE FROM documents WHERE path = $1`, path); err != nil {
+		return fmt.Errorf("delete document %q: %w", path, err)
+	}
+	return nil
 }
 
 // ReplaceChunks deletes any existing chunks for documentID and inserts the
@@ -133,6 +116,49 @@ func (s *Store) ReplaceChunks(ctx context.Context, documentID int64, chunks []Ch
 		return fmt.Errorf("commit chunk replacement for document %d: %w", documentID, err)
 	}
 	return nil
+}
+
+// SearchResult is one chunk returned by a similarity search, together with
+// enough metadata to be useful to a caller: which document it came from and
+// how close a match it is.
+type SearchResult struct {
+	Source   string
+	Content  string
+	Distance float64
+}
+
+// SearchChunks returns the topK chunks whose embeddings are closest to
+// queryEmbedding, nearest first, using pgvector's cosine-distance operator
+// (<=>) — the metric nomic-embed-text (internal/config's default) is
+// designed for, and the same one migration 000002's HNSW index is built
+// against. Distance is 1 - cosine similarity: 0 means an exact match,
+// larger means less similar.
+func (s *Store) SearchChunks(ctx context.Context, queryEmbedding []float32, topK int) ([]SearchResult, error) {
+	const q = `
+		SELECT d.path, c.content, c.embedding <=> $1 AS distance
+		FROM chunks c
+		JOIN documents d ON d.id = c.document_id
+		ORDER BY c.embedding <=> $1
+		LIMIT $2`
+
+	rows, err := s.pool.Query(ctx, q, pgvector.NewVector(queryEmbedding), topK)
+	if err != nil {
+		return nil, fmt.Errorf("search chunks: %w", err)
+	}
+	defer rows.Close()
+
+	var results []SearchResult
+	for rows.Next() {
+		var r SearchResult
+		if err := rows.Scan(&r.Source, &r.Content, &r.Distance); err != nil {
+			return nil, fmt.Errorf("scan search result: %w", err)
+		}
+		results = append(results, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate search results: %w", err)
+	}
+	return results, nil
 }
 
 // CountChunks returns the total number of chunk rows, for tests and

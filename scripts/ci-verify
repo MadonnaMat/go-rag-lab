@@ -6,12 +6,22 @@ set -euo pipefail
 # service against them twice, asserting on the resulting database state
 # directly each time — not just that the container exited 0. Confirms
 # real rows land, and that re-running replaces them rather than
-# duplicating them.
+# duplicating them. Finally brings up the containerized serve service and
+# makes a real /query call against the real ingested data through the real
+# Ollama, asserting on the ranked result — the one tier of testing that
+# needs a live embedding model, so it lives here rather than in `make test`.
 
 POSTGRES_USER="${POSTGRES_USER:-rag}"
 POSTGRES_DB="${POSTGRES_DB:-rag}"
+SERVER_PORT="${SERVER_PORT:-8080}"
 
 docker compose up -d --wait db ollama
+
+# app/cmd-ingest no longer creates the schema itself (see internal/store's
+# migrations) — apply it explicitly first, via the same containerized
+# `migrate` service a local `docker compose run --rm migrate` would use, so
+# CI exercises the same path as documented rather than a bespoke one.
+docker compose run --rm migrate
 
 sql_count() {
   docker compose exec -T db psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "SELECT count(*) FROM $1;"
@@ -48,3 +58,29 @@ fi
 
 echo
 echo "OK: containerized ingestion produced $docs1 documents / $chunks1 chunks, stable across a re-run"
+
+echo
+echo "== Query API smoke test (serve + real Ollama) =="
+OLLAMA_URL=http://ollama:11434 docker compose up -d --build serve
+
+# serve's image is distroless/static (no shell, no curl/wget inside the
+# container to back a docker-compose healthcheck), so poll it from out here
+# instead — same as how a real deploy's smoke test would probe a service
+# from outside it.
+for i in $(seq 1 30); do
+  curl -fsS "http://localhost:$SERVER_PORT/healthz" >/dev/null 2>&1 && break
+  sleep 1
+done
+
+response=$(curl -fsS -G "http://localhost:$SERVER_PORT/query" \
+  --data-urlencode "query=how did Ulmarin develop technology without fire or metal?" \
+  --data-urlencode "top_k=1")
+echo "$response"
+
+if ! echo "$response" | grep -q '"source":"04-ulmarin-technology.md"'; then
+  echo "FAIL: expected the technology doc as the top match, got: $response" >&2
+  exit 1
+fi
+
+echo
+echo "OK: containerized query API returned the expected top match"
