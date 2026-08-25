@@ -1,0 +1,73 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Local dev convenience: brings up everything needed to try the query API
+# in a browser (native Ollama + `db` in Docker, migrated and ingested with
+# sample_docs), then runs cmd/serve in the foreground so you can just go
+# check the browser and Ctrl-C when done. Only stops what it itself
+# started — anything already running before this script was invoked is
+# left alone.
+
+# Same .env pickup as the Makefile's `include .env; export`, so
+# DATABASE_URL/OLLAMA_URL/etc. here match whatever `make` targets use.
+if [ -f .env ]; then
+  set -a
+  source .env
+  set +a
+fi
+
+STARTED_OLLAMA=false
+STARTED_DB=false
+
+cleanup() {
+  echo
+  echo "== Shutting down =="
+
+  # Ctrl-C's SIGINT hits the whole foreground process group, so `go run
+  # ./cmd/serve`'s compiled child is normally already dead by the time this
+  # runs — this is just a cheap safety net, not the primary shutdown path.
+  pkill -f 'go-build.*/exe/serve' 2>/dev/null || true
+
+  if $STARTED_DB; then
+    echo "Stopping db (started by this script)..."
+    docker compose stop db
+  fi
+  if $STARTED_OLLAMA; then
+    ./scripts/ollama-dev --daemon stop
+  fi
+}
+trap cleanup EXIT
+
+ollama_reachable() { curl -fsS -o /dev/null "${OLLAMA_URL:-http://localhost:11434}" 2>/dev/null; }
+
+if ollama_reachable; then
+  echo "== Ollama already reachable at ${OLLAMA_URL:-http://localhost:11434}; leaving it as-is =="
+else
+  ./scripts/ollama-dev --daemon
+  STARTED_OLLAMA=true
+fi
+
+if [ -n "$(docker compose ps --status running -q db)" ]; then
+  echo "== db already running; leaving it as-is =="
+else
+  echo "== Starting db =="
+  docker compose up -d --wait db
+  STARTED_DB=true
+fi
+
+echo
+echo "== Applying migrations =="
+go run ./cmd/migrate
+
+echo
+echo "== Ingesting sample_docs =="
+go run ./cmd/ingest -dir=sample_docs
+
+ADDR="${SERVER_ADDR:-:8080}"
+PORT="${ADDR##*:}"
+echo
+echo "== Starting cmd/serve — Ctrl-C to stop everything this script started =="
+echo "  Swagger UI: http://localhost:$PORT/swagger/index.html"
+echo "  Health:     http://localhost:$PORT/healthz"
+echo
+go run ./cmd/serve

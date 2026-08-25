@@ -1,4 +1,4 @@
-.PHONY: build vet fmt fmt-check lint test test-unit up down ingest migrate migrate-down swagger ci-verify
+.PHONY: build vet fmt fmt-check lint test test-unit up down ingest migrate migrate-down swagger dev-up ci-verify
 
 # Loads .env (if present) as real Make variables, exported to every
 # recipe's environment — a single source instead of each target having to
@@ -68,6 +68,13 @@ migrate-down:
 
 ingest:
 	go run ./cmd/ingest -dir=sample_docs
+
+# Quick local-verification loop: starts Ollama + db (only if not already
+# running), migrates + ingests sample_docs, then runs cmd/serve in the
+# foreground — go check the browser, Ctrl-C to stop everything this
+# started. See scripts/dev-up.
+dev-up:
+	./scripts/dev-up
 
 # CI only: see scripts/ci-verify — brings up db + the pre-baked CI-only
 # Ollama, runs the containerized app service against them twice, and

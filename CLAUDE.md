@@ -35,6 +35,12 @@ days and don't exist yet, don't assume they do.
   running, live Swagger UI is at `http://<addr>/swagger/index.html`.
 - `scripts/ollama-dev --daemon` — installs Ollama if needed, ensures the
   systemd service is running, pulls the embedding model
+- `make dev-up` (`scripts/dev-up`) — one-command local verification loop:
+  starts Ollama + `db` (only if not already running), migrates, ingests
+  `sample_docs/`, then runs `cmd/serve` in the foreground so you can go
+  check the browser. Ctrl-C stops `cmd/serve` and, via a trap, anything
+  else this specific invocation started — it leaves alone whatever was
+  already running before it was called.
 
 The `Dockerfile` is multi-stage: one shared build stage compiles all three
 binaries (`ingest`/`serve`/`migrate`), and each gets its own thin final
