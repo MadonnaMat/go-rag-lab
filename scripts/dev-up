@@ -63,6 +63,10 @@ echo
 echo "== Ingesting sample_docs =="
 go run ./cmd/ingest -dir=sample_docs
 
+echo
+echo "== Regenerating Swagger docs =="
+make swagger
+
 ADDR="${SERVER_ADDR:-:8080}"
 PORT="${ADDR##*:}"
 echo
