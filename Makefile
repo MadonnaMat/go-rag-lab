@@ -8,10 +8,11 @@ include .env
 export
 endif
 
-# swagger regenerates docs/ from current source annotations before every
-# build, so the shipped spec can't silently drift from what's committed —
-# there's nothing to check for staleness because it's always freshly
-# derived at build time.
+# docs/ is generated (gitignored, not committed — see CLAUDE.md's "API
+# docs" section) and cmd/serve blank-imports it, so every target that
+# compiles anything depends on swagger first — otherwise a bare `go build`/
+# `vet`/`test` on a fresh clone (bypassing make entirely) would be the only
+# way to hit a "package not found" error.
 build: swagger
 	go build ./...
 
@@ -22,7 +23,7 @@ build: swagger
 swagger:
 	go tool swag init -g cmd/serve/main.go -o docs
 
-vet:
+vet: swagger
 	go vet ./...
 
 fmt:
@@ -35,7 +36,7 @@ lint: fmt-check vet
 
 # Unit tests only: force DATABASE_URL empty for this invocation so DB tests
 # self-skip via t.Skip, even if it's exported in the calling shell.
-test-unit:
+test-unit: swagger
 	DATABASE_URL= go test ./... -v
 
 # Full suite: runs tests against TEST_DATABASE_URL (as DATABASE_URL)
@@ -43,7 +44,7 @@ test-unit:
 # ingested documents. Requires `make up` running. Applies migrations first
 # so this stays a single command in CI, with no separate "migrate the test
 # database" step to remember.
-test:
+test: swagger
 	DATABASE_URL="$(TEST_DATABASE_URL)" go run ./cmd/migrate
 	DATABASE_URL="$(TEST_DATABASE_URL)" go test ./... -v
 

@@ -29,10 +29,10 @@ days and don't exist yet, don't assume they do.
 - `docker compose up --build serve` — runs the query API in the
   containerized path instead of natively (`go run ./cmd/serve`), against
   your host-installed Ollama
-- `make swagger` — regenerates `docs/` (the OpenAPI spec) from current
-  source annotations; also runs automatically as a `make build`
-  prerequisite. With `cmd/serve` running, live Swagger UI is at
-  `http://<addr>/swagger/index.html`.
+- `make swagger` — regenerates `docs/` (gitignored, not committed — see
+  "API docs" below), the OpenAPI spec, from current source annotations;
+  also a prerequisite of `build`/`vet`/`test-unit`/`test`. With `cmd/serve`
+  running, live Swagger UI is at `http://<addr>/swagger/index.html`.
 - `scripts/ollama-dev --daemon` — installs Ollama if needed, ensures the
   systemd service is running, pulls the embedding model
 
@@ -98,19 +98,24 @@ containerized ingest run.
 `swaggo/swag` from `@`-annotation doc-comments — the general API info block
 above `func main()` in `cmd/serve/main.go`, and per-endpoint annotations
 (`@Summary`, `@Param`, `@Success`, `@Router`, etc.) above each handler in
-`internal/api/api.go`. **Never hand-edit `docs/`** — run `make swagger` (or
-just `make build`, which depends on it) to regenerate after changing an
-annotation. It's committed to git anyway (required for `go build ./...` to
-compile at all outside `make`, since `cmd/serve` blank-imports it — same
-reasoning `internal/store/migrations/*.sql` are committed source, not
-build-time-only output), but every real build regenerates it fresh from
-current source first, so the shipped spec can't silently drift from what's
-annotated. `swag` itself is a `tool` dependency in `go.mod` (Go 1.24+ tool
-tracking, run via `go tool swag` — no separate global install). Request/
-response types in `internal/api` (`QueryRequest`, `QueryResponse`,
-`QueryResult`) are exported specifically so `swag`'s reflection-based schema
-generation can introspect them — don't make them unexported again without
-checking `make swagger` still works.
+`internal/api/api.go`. **Never hand-edit `docs/`, and it's gitignored, not
+committed** — it's pure build output (unlike `internal/store/migrations/`,
+which is hand-authored source and does belong in git), so committing it
+would just be redundant, diff-noisy generated-file churn on every
+annotation tweak. `build`, `vet`, `test-unit`, and `test` all depend on a
+`swagger` Make target that regenerates it first (`go tool swag init -g
+cmd/serve/main.go -o docs`; the `Dockerfile`'s build stage does the same),
+so any of those commands works from a fresh clone — the one gap is running
+a bare `go build`/`go vet`/`go test` directly, bypassing `make` entirely,
+before any `make` target has run once; that needs `make swagger` (or any
+of the four targets above) run first, same "explicit one-time step"
+precondition `make migrate` already has for `make ingest`/`cmd/serve`.
+`swag` itself is a `tool` dependency in `go.mod` (Go 1.24+ tool tracking,
+run via `go tool swag` — no separate global install). Request/response
+types in `internal/api` (`QueryRequest`, `QueryResponse`, `QueryResult`)
+are exported specifically so `swag`'s reflection-based schema generation
+can introspect them — don't make them unexported again without checking
+`make swagger` still works.
 
 ## Conventions
 
