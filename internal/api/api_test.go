@@ -5,7 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"strings"
+	"net/url"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -37,7 +37,7 @@ func (f *fakeRetriever) Query(ctx context.Context, q string, topK int) ([]store.
 func TestHandleQuery(t *testing.T) {
 	tests := []struct {
 		name             string
-		body             string
+		query            url.Values
 		retriever        *fakeRetriever
 		wantStatus       int
 		wantBodyContains string
@@ -46,7 +46,7 @@ func TestHandleQuery(t *testing.T) {
 	}{
 		{
 			name:             "happy path",
-			body:             `{"query":"how does X work","top_k":2}`,
+			query:            url.Values{"query": {"how does X work"}, "top_k": {"2"}},
 			retriever:        &fakeRetriever{results: []store.SearchResult{{Source: "a.md", Content: "hello", Distance: 0.1}}},
 			wantStatus:       http.StatusOK,
 			wantBodyContains: `"source":"a.md"`,
@@ -55,23 +55,31 @@ func TestHandleQuery(t *testing.T) {
 		},
 		{
 			name:             "empty query is rejected before calling the retriever",
-			body:             `{"query":"","top_k":2}`,
+			query:            url.Values{"query": {""}, "top_k": {"2"}},
 			retriever:        &fakeRetriever{},
 			wantStatus:       http.StatusBadRequest,
 			wantBodyContains: "query must not be empty",
 			wantCalled:       false,
 		},
 		{
-			name:             "malformed JSON is rejected before calling the retriever",
-			body:             `{not json`,
+			name:             "missing query param is rejected before calling the retriever",
+			query:            url.Values{"top_k": {"2"}},
 			retriever:        &fakeRetriever{},
 			wantStatus:       http.StatusBadRequest,
-			wantBodyContains: "invalid JSON body",
+			wantBodyContains: "query must not be empty",
+			wantCalled:       false,
+		},
+		{
+			name:             "non-integer top_k is rejected before calling the retriever",
+			query:            url.Values{"query": {"how does X work"}, "top_k": {"abc"}},
+			retriever:        &fakeRetriever{},
+			wantStatus:       http.StatusBadRequest,
+			wantBodyContains: "top_k must be an integer",
 			wantCalled:       false,
 		},
 		{
 			name:             "retriever error surfaces as 500",
-			body:             `{"query":"how does X work","top_k":2}`,
+			query:            url.Values{"query": {"how does X work"}, "top_k": {"2"}},
 			retriever:        &fakeRetriever{err: errors.New("embedding backend unavailable")},
 			wantStatus:       http.StatusInternalServerError,
 			wantBodyContains: "embedding backend unavailable",
@@ -80,7 +88,7 @@ func TestHandleQuery(t *testing.T) {
 		},
 		{
 			name:             "top_k omitted falls back to DefaultTopK",
-			body:             `{"query":"how does X work"}`,
+			query:            url.Values{"query": {"how does X work"}},
 			retriever:        &fakeRetriever{},
 			wantStatus:       http.StatusOK,
 			wantBodyContains: `"results":[]`,
@@ -94,7 +102,8 @@ func TestHandleQuery(t *testing.T) {
 			h := &Handler{Retriever: tt.retriever, DefaultTopK: 5}
 			router := NewRouter(h)
 
-			req := httptest.NewRequest(http.MethodPost, "/query", strings.NewReader(tt.body))
+			target := "/query?" + tt.query.Encode()
+			req := httptest.NewRequest(http.MethodGet, target, nil)
 			rec := httptest.NewRecorder()
 			router.ServeHTTP(rec, req)
 

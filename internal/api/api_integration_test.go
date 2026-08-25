@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -94,7 +94,7 @@ func TestQueryEndToEnd(t *testing.T) {
 	srv := httptest.NewServer(handler)
 	defer srv.Close()
 
-	resp, err := http.Post(srv.URL+"/query", "application/json", strings.NewReader(`{"query":"anything"}`))
+	resp, err := http.Get(srv.URL + "/query?" + url.Values{"query": {"anything"}}.Encode())
 	require.NoError(t, err)
 	defer resp.Body.Close()
 	require.Equal(t, http.StatusOK, resp.StatusCode)

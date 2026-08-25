@@ -1,13 +1,14 @@
 // Package api is the HTTP layer over internal/retrieve: a thin chi router
-// that decodes a query request, calls a Retriever, and encodes the results
-// as JSON — no orchestration logic of its own, the query-side mirror of how
-// cmd/ingest is a thin wrapper around internal/ingest.
+// that parses a query from the request, calls a Retriever, and encodes the
+// results as JSON — no orchestration logic of its own, the query-side
+// mirror of how cmd/ingest is a thin wrapper around internal/ingest.
 package api
 
 import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strconv"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -36,15 +37,9 @@ func NewRouter(h *Handler) http.Handler {
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Logger)
 	r.Get("/healthz", h.handleHealthz)
-	r.Post("/query", h.handleQuery)
+	r.Get("/query", h.handleQuery)
 	r.Get("/swagger/*", httpSwagger.WrapHandler)
 	return r
-}
-
-// QueryRequest is the POST /query request body.
-type QueryRequest struct {
-	Query string `json:"query"`
-	TopK  int    `json:"top_k"`
 }
 
 // QueryResult is one ranked chunk in a QueryResponse.
@@ -54,7 +49,7 @@ type QueryResult struct {
 	Distance float64 `json:"distance"`
 }
 
-// QueryResponse is the POST /query response body.
+// QueryResponse is the GET /query response body.
 type QueryResponse struct {
 	Results []QueryResult `json:"results"`
 }
@@ -62,32 +57,35 @@ type QueryResponse struct {
 // handleQuery godoc
 //
 //	@Summary		Search ingested chunks
-//	@Description	Embeds the query text with the same provider used at ingestion time, then returns the topK nearest chunks by cosine distance (nearest first).
+//	@Description	Embeds the query text with the same provider used at ingestion time, then returns the topK nearest chunks by cosine distance (nearest first). A search like this is a safe, idempotent read, so it's a GET with query parameters rather than a POST with a body.
 //	@Tags			query
-//	@Accept			json
 //	@Produce		json
-//	@Param			request	body		QueryRequest	true	"Query"
+//	@Param			query	query		string	true	"Query text"
+//	@Param			top_k	query		int		false	"Number of results to return (defaults to the server's configured default)"
 //	@Success		200		{object}	QueryResponse
 //	@Failure		400		{object}	map[string]string
 //	@Failure		500		{object}	map[string]string
-//	@Router			/query [post]
+//	@Router			/query [get]
 func (h *Handler) handleQuery(w http.ResponseWriter, r *http.Request) {
-	var req QueryRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
-		return
-	}
-	if req.Query == "" {
+	q := r.URL.Query().Get("query")
+	if q == "" {
 		writeError(w, http.StatusBadRequest, "query must not be empty")
 		return
 	}
 
-	topK := req.TopK
-	if topK <= 0 {
-		topK = h.DefaultTopK
+	topK := h.DefaultTopK
+	if raw := r.URL.Query().Get("top_k"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "top_k must be an integer")
+			return
+		}
+		if n > 0 {
+			topK = n
+		}
 	}
 
-	results, err := h.Retriever.Query(r.Context(), req.Query, topK)
+	results, err := h.Retriever.Query(r.Context(), q, topK)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return

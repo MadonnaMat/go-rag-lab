@@ -72,8 +72,9 @@ for i in $(seq 1 30); do
   sleep 1
 done
 
-response=$(curl -fsS -X POST "http://localhost:$SERVER_PORT/query" \
-  -d '{"query":"how did Ulmarin develop technology without fire or metal?","top_k":1}')
+response=$(curl -fsS -G "http://localhost:$SERVER_PORT/query" \
+  --data-urlencode "query=how did Ulmarin develop technology without fire or metal?" \
+  --data-urlencode "top_k=1")
 echo "$response"
 
 if ! echo "$response" | grep -q '"source":"04-ulmarin-technology.md"'; then

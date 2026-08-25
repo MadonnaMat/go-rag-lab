@@ -68,8 +68,14 @@ else changes.
 The query side mirrors this exactly: `internal/embedding` + `internal/store`
 → `internal/retrieve` (embeds a query with the same `Provider` used at
 ingestion, then asks the store for the nearest chunks) → `internal/api` (a
-thin `chi` HTTP layer: `POST /query`, `GET /healthz`, `GET /swagger/*`) →
-`cmd/serve/main.go` (thin: flags + wiring only). `ingest.Store` and
+thin `chi` HTTP layer: `GET /query`, `GET /healthz`, `GET /swagger/*`) →
+`cmd/serve/main.go` (thin: flags + wiring only). `/query` is `GET` with
+`query`/`top_k` as URL query params, not `POST` with a JSON body — a search
+here is a safe, idempotent read (no state changes, no side effects), which
+is exactly what `GET` semantics are for; it also means it's directly
+testable by pasting a URL into a browser. Don't reflexively default a new
+JSON-shaped endpoint to `POST` — check whether it's actually a read first.
+`ingest.Store` and
 `retrieve.Store` are each a small interface (not `*store.Store` directly)
 so tests substitute a fake with no real Postgres involved — Go interfaces
 are satisfied structurally, so `*store.Store` never had to declare it
