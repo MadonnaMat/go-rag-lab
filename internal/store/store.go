@@ -66,6 +66,15 @@ func (s *Store) UpsertDocument(ctx context.Context, path, contentHash string) (i
 	return id, nil
 }
 
+// DeleteDocument deletes a document row, cascading to its chunks via the
+// chunks table's ON DELETE CASCADE foreign key.
+func (s *Store) DeleteDocument(ctx context.Context, path string) error {
+	if _, err := s.pool.Exec(ctx, `DELETE FROM documents WHERE path = $1`, path); err != nil {
+		return fmt.Errorf("delete document %q: %w", path, err)
+	}
+	return nil
+}
+
 // ReplaceChunks deletes any existing chunks for documentID and inserts the
 // given ones in their place, in one transaction — so re-running ingestion
 // on the same document replaces its chunks rather than duplicating them.

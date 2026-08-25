@@ -36,7 +36,7 @@ func testStore(t *testing.T) *Store {
 func cleanupDocument(t *testing.T, s *Store, path string) {
 	t.Helper()
 	t.Cleanup(func() {
-		_, err := s.pool.Exec(context.Background(), `DELETE FROM documents WHERE path = $1`, path)
+		err := s.DeleteDocument(context.Background(), path)
 		assert.NoError(t, err, "cleanup: delete document %q", path)
 	})
 }
