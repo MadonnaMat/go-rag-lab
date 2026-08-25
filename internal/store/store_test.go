@@ -11,7 +11,10 @@ import (
 // testStore opens a Store against DATABASE_URL, skipping the test entirely
 // if it's unset — so `go test ./...` works with no Postgres running, and
 // only exercises this package when DATABASE_URL points at a real database
-// (docker-compose locally, the service container in CI).
+// (docker-compose locally, the service container in CI). The target
+// database is assumed to already have migrations applied — `make test`
+// runs `make migrate`'s equivalent against TEST_DATABASE_URL before `go
+// test` starts, same precondition Open itself now documents.
 func testStore(t *testing.T) *Store {
 	t.Helper()
 	url := os.Getenv("DATABASE_URL")
@@ -19,13 +22,9 @@ func testStore(t *testing.T) *Store {
 		t.Skip("DATABASE_URL not set; skipping test that needs a real Postgres")
 	}
 
-	ctx := context.Background()
-	s, err := Open(ctx, url)
+	s, err := Open(context.Background(), url)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
-	}
-	if err := s.EnsureSchema(ctx); err != nil {
-		t.Fatalf("EnsureSchema: %v", err)
 	}
 	t.Cleanup(s.Close)
 	return s
@@ -41,13 +40,6 @@ func cleanupDocument(t *testing.T, s *Store, path string) {
 			t.Errorf("cleanup: delete document %q: %v", path, err)
 		}
 	})
-}
-
-func TestEnsureSchema_Idempotent(t *testing.T) {
-	s := testStore(t)
-	if err := s.EnsureSchema(context.Background()); err != nil {
-		t.Fatalf("second EnsureSchema call returned error: %v", err)
-	}
 }
 
 func TestUpsertDocumentAndReplaceChunks_RoundTrip(t *testing.T) {

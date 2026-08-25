@@ -3,6 +3,11 @@
 // wrapper: all the real logic lives in internal/ingest, internal/embedding,
 // and internal/store — this file just parses flags and wires them
 // together.
+//
+// Requires the database schema to already exist — run `make migrate` (or
+// `docker compose run --rm migrate`) first. Unlike the old EnsureSchema,
+// ingest no longer creates it for you: schema setup is the migration
+// runner's job alone.
 package main
 
 import (
@@ -44,10 +49,6 @@ func run(dir string) error {
 		return fmt.Errorf("open store: %w", err)
 	}
 	defer s.Close()
-
-	if err := s.EnsureSchema(ctx); err != nil {
-		return fmt.Errorf("ensure schema: %w", err)
-	}
 
 	ing := &ingest.Ingester{
 		Store:        s,

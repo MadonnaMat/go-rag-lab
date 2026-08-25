@@ -1,6 +1,6 @@
 CREATE EXTENSION IF NOT EXISTS vector;
 
-CREATE TABLE IF NOT EXISTS documents (
+CREATE TABLE documents (
     id           BIGSERIAL PRIMARY KEY,
     path         TEXT NOT NULL UNIQUE,
     content_hash TEXT NOT NULL,
@@ -8,11 +8,11 @@ CREATE TABLE IF NOT EXISTS documents (
 );
 
 -- 768 = nomic-embed-text's output dimension (internal/embedding). Switching
--- embedding models means re-running ingestion against a matching column
--- size, not just new data — see internal/embedding/ollama.go discussion.
--- Also update internal/config.Load's OLLAMA_EMBED_MODEL default and
+-- embedding models means a new migration against a matching column size,
+-- not just new data — see internal/embedding/ollama.go discussion. Also
+-- update internal/config.Load's OLLAMA_EMBED_MODEL default and
 -- docker/ollama-ci/Dockerfile's pre-baked model together with this.
-CREATE TABLE IF NOT EXISTS chunks (
+CREATE TABLE chunks (
     id           BIGSERIAL PRIMARY KEY,
     document_id  BIGINT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
     chunk_index  INT NOT NULL,

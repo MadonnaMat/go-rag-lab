@@ -1,4 +1,4 @@
-.PHONY: build vet fmt fmt-check lint test test-unit up down ingest ci-verify
+.PHONY: build vet fmt fmt-check lint test test-unit up down ingest migrate migrate-down ci-verify
 
 # Loads .env (if present) as real Make variables, exported to every
 # recipe's environment — a single source instead of each target having to
@@ -29,8 +29,11 @@ test-unit:
 
 # Full suite: runs tests against TEST_DATABASE_URL (as DATABASE_URL)
 # rather than dev's DATABASE_URL — so DB-gated tests never touch real
-# ingested documents. Requires `make up` running.
+# ingested documents. Requires `make up` running. Applies migrations first
+# so this stays a single command in CI, with no separate "migrate the test
+# database" step to remember.
 test:
+	DATABASE_URL="$(TEST_DATABASE_URL)" go run ./cmd/migrate
 	DATABASE_URL="$(TEST_DATABASE_URL)" go test ./... -v
 
 up:
@@ -38,6 +41,18 @@ up:
 
 down:
 	docker compose down
+
+# Schema setup is now the migration runner's job alone (see
+# internal/store/migrations) — run this once against a fresh database
+# before `make ingest` or `cmd/serve` will work. Not chained to `ingest`
+# automatically: applying migrations is a deliberate, explicit step, not
+# something ingestion/serving silently does on your behalf every time they
+# start.
+migrate:
+	go run ./cmd/migrate
+
+migrate-down:
+	go run ./cmd/migrate -down
 
 ingest:
 	go run ./cmd/ingest -dir=sample_docs

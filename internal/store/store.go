@@ -4,7 +4,6 @@ package store
 
 import (
 	"context"
-	_ "embed"
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
@@ -12,14 +11,6 @@ import (
 	"github.com/pgvector/pgvector-go"
 	pgxvec "github.com/pgvector/pgvector-go/pgx"
 )
-
-// schemaSQL is the DDL in schema.sql, embedded into the compiled binary at
-// build time via go:embed so no separate SQL file needs to ship or be
-// mounted alongside the app — the schema-setup code path is identical
-// locally, in docker-compose, and in CI.
-//
-//go:embed schema.sql
-var schemaSQL string
 
 type Store struct {
 	pool *pgxpool.Pool
@@ -36,22 +27,14 @@ type Chunk struct {
 // every connection in the pool, so query args/results can use []float32
 // (via pgvector.NewVector) directly.
 //
-// This needs a two-step connect: pgxvec.RegisterTypes looks up the vector
-// type's OID, which only exists once the extension has been created. On a
-// brand-new database that hasn't happened yet, so a plain bootstrap
-// connection creates the extension first, before any pooled connection
-// (which registers types in AfterConnect below) is opened.
+// pgxvec.RegisterTypes looks up the vector type's OID, which only exists
+// once the vector extension has been created — Open assumes that, and the
+// rest of the schema, is already in place via `make migrate` /
+// `internal/store.MigrateUp` (see migrate.go). Unlike the old EnsureSchema,
+// there's no defensive "create it if missing" step here anymore: schema
+// setup is now the migration runner's job alone, run once, explicitly,
+// before the app ever calls Open.
 func Open(ctx context.Context, databaseURL string) (*Store, error) {
-	bootstrap, err := pgx.Connect(ctx, databaseURL)
-	if err != nil {
-		return nil, fmt.Errorf("connect to create vector extension: %w", err)
-	}
-	_, err = bootstrap.Exec(ctx, `CREATE EXTENSION IF NOT EXISTS vector`)
-	bootstrap.Close(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("create vector extension: %w", err)
-	}
-
 	cfg, err := pgxpool.ParseConfig(databaseURL)
 	if err != nil {
 		return nil, fmt.Errorf("parse database url: %w", err)
@@ -65,15 +48,6 @@ func Open(ctx context.Context, databaseURL string) (*Store, error) {
 		return nil, fmt.Errorf("open database pool: %w", err)
 	}
 	return &Store{pool: pool}, nil
-}
-
-// EnsureSchema creates the vector extension and tables if they don't
-// already exist. Safe to call every time the app starts.
-func (s *Store) EnsureSchema(ctx context.Context) error {
-	if _, err := s.pool.Exec(ctx, schemaSQL); err != nil {
-		return fmt.Errorf("ensure schema: %w", err)
-	}
-	return nil
 }
 
 // UpsertDocument inserts a document row, or updates its content_hash if a
