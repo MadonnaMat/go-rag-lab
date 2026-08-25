@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	"github.com/pgvector/pgvector-go"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // testStore opens a Store against DATABASE_URL, skipping the test entirely
@@ -23,9 +25,7 @@ func testStore(t *testing.T) *Store {
 	}
 
 	s, err := Open(context.Background(), url)
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
+	require.NoError(t, err)
 	t.Cleanup(s.Close)
 	return s
 }
@@ -36,10 +36,21 @@ func testStore(t *testing.T) *Store {
 func cleanupDocument(t *testing.T, s *Store, path string) {
 	t.Helper()
 	t.Cleanup(func() {
-		if _, err := s.pool.Exec(context.Background(), `DELETE FROM documents WHERE path = $1`, path); err != nil {
-			t.Errorf("cleanup: delete document %q: %v", path, err)
-		}
+		_, err := s.pool.Exec(context.Background(), `DELETE FROM documents WHERE path = $1`, path)
+		assert.NoError(t, err, "cleanup: delete document %q", path)
 	})
+}
+
+// vec768 returns a 768-dim embedding with 1.0 at each given index and 0
+// elsewhere — enough to construct vectors with known cosine distances
+// (identical indices = distance 0, disjoint indices = distance 1, partial
+// overlap = in between) without needing real embeddings.
+func vec768(indices ...int) []float32 {
+	v := make([]float32, 768)
+	for _, i := range indices {
+		v[i] = 1
+	}
+	return v
 }
 
 func TestUpsertDocumentAndReplaceChunks_RoundTrip(t *testing.T) {
@@ -49,9 +60,7 @@ func TestUpsertDocumentAndReplaceChunks_RoundTrip(t *testing.T) {
 	cleanupDocument(t, s, path)
 
 	docID, err := s.UpsertDocument(ctx, path, "hash-1")
-	if err != nil {
-		t.Fatalf("UpsertDocument: %v", err)
-	}
+	require.NoError(t, err)
 
 	embedding := make([]float32, 768)
 	embedding[0] = 0.5
@@ -60,31 +69,20 @@ func TestUpsertDocumentAndReplaceChunks_RoundTrip(t *testing.T) {
 	err = s.ReplaceChunks(ctx, docID, []Chunk{
 		{Index: 0, Content: "first chunk", Embedding: embedding},
 	})
-	if err != nil {
-		t.Fatalf("ReplaceChunks: %v", err)
-	}
+	require.NoError(t, err)
 
 	var gotContent string
 	var gotEmbedding pgvector.Vector
 	row := s.pool.QueryRow(ctx,
 		`SELECT content, embedding FROM chunks WHERE document_id = $1 AND chunk_index = 0`,
 		docID)
-	if err := row.Scan(&gotContent, &gotEmbedding); err != nil {
-		t.Fatalf("query inserted chunk: %v", err)
-	}
-	if gotContent != "first chunk" {
-		t.Errorf("content = %q, want %q", gotContent, "first chunk")
-	}
+	require.NoError(t, row.Scan(&gotContent, &gotEmbedding))
+	assert.Equal(t, "first chunk", gotContent)
+
 	gotSlice := gotEmbedding.Slice()
-	if len(gotSlice) != len(embedding) {
-		t.Fatalf("embedding length = %d, want %d", len(gotSlice), len(embedding))
-	}
-	if gotSlice[0] != 0.5 {
-		t.Errorf("embedding[0] = %v, want 0.5", gotSlice[0])
-	}
-	if gotSlice[767] != -0.25 {
-		t.Errorf("embedding[767] = %v, want -0.25", gotSlice[767])
-	}
+	require.Len(t, gotSlice, len(embedding))
+	assert.Equal(t, float32(0.5), gotSlice[0])
+	assert.Equal(t, float32(-0.25), gotSlice[767])
 }
 
 func TestReplaceChunks_ReplacesNotDuplicates(t *testing.T) {
@@ -94,9 +92,7 @@ func TestReplaceChunks_ReplacesNotDuplicates(t *testing.T) {
 	cleanupDocument(t, s, path)
 
 	docID, err := s.UpsertDocument(ctx, path, "hash-1")
-	if err != nil {
-		t.Fatalf("UpsertDocument: %v", err)
-	}
+	require.NoError(t, err)
 
 	emptyVec := make([]float32, 768)
 	firstRun := []Chunk{
@@ -104,23 +100,43 @@ func TestReplaceChunks_ReplacesNotDuplicates(t *testing.T) {
 		{Index: 1, Content: "b", Embedding: emptyVec},
 		{Index: 2, Content: "c", Embedding: emptyVec},
 	}
-	if err := s.ReplaceChunks(ctx, docID, firstRun); err != nil {
-		t.Fatalf("ReplaceChunks (first run): %v", err)
-	}
+	require.NoError(t, s.ReplaceChunks(ctx, docID, firstRun))
 
 	secondRun := []Chunk{
 		{Index: 0, Content: "x", Embedding: emptyVec},
 	}
-	if err := s.ReplaceChunks(ctx, docID, secondRun); err != nil {
-		t.Fatalf("ReplaceChunks (second run): %v", err)
-	}
+	require.NoError(t, s.ReplaceChunks(ctx, docID, secondRun))
 
 	var count int
 	err = s.pool.QueryRow(ctx, `SELECT count(*) FROM chunks WHERE document_id = $1`, docID).Scan(&count)
-	if err != nil {
-		t.Fatalf("count chunks: %v", err)
-	}
-	if count != len(secondRun) {
-		t.Errorf("chunk count after second ReplaceChunks = %d, want %d (replaced, not appended)", count, len(secondRun))
-	}
+	require.NoError(t, err)
+	assert.Equal(t, len(secondRun), count, "chunk count after second ReplaceChunks should reflect a replace, not an append")
+}
+
+func TestSearchChunks_OrdersByDistanceAndLimitsToTopK(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+	const path = "store_test.go::search_chunks"
+	cleanupDocument(t, s, path)
+
+	docID, err := s.UpsertDocument(ctx, path, "hash-1")
+	require.NoError(t, err)
+
+	err = s.ReplaceChunks(ctx, docID, []Chunk{
+		{Index: 0, Content: "orthogonal", Embedding: vec768(1)},
+		{Index: 1, Content: "exact match", Embedding: vec768(0)},
+		{Index: 2, Content: "partial match", Embedding: vec768(0, 1)},
+	})
+	require.NoError(t, err)
+
+	results, err := s.SearchChunks(ctx, vec768(0), 2)
+	require.NoError(t, err)
+	require.Len(t, results, 2, "topK=2 should limit to 2 results even though 3 chunks exist for this document")
+
+	assert.Equal(t, "exact match", results[0].Content)
+	assert.Equal(t, path, results[0].Source)
+	assert.InDelta(t, 0, results[0].Distance, 1e-6)
+
+	assert.Equal(t, "partial match", results[1].Content)
+	assert.Greater(t, results[1].Distance, results[0].Distance, "a partial match should be farther than an exact one")
 }

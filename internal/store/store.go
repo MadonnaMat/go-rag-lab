@@ -109,6 +109,49 @@ func (s *Store) ReplaceChunks(ctx context.Context, documentID int64, chunks []Ch
 	return nil
 }
 
+// SearchResult is one chunk returned by a similarity search, together with
+// enough metadata to be useful to a caller: which document it came from and
+// how close a match it is.
+type SearchResult struct {
+	Source   string
+	Content  string
+	Distance float64
+}
+
+// SearchChunks returns the topK chunks whose embeddings are closest to
+// queryEmbedding, nearest first, using pgvector's cosine-distance operator
+// (<=>) — the metric nomic-embed-text (internal/config's default) is
+// designed for, and the same one migration 000002's HNSW index is built
+// against. Distance is 1 - cosine similarity: 0 means an exact match,
+// larger means less similar.
+func (s *Store) SearchChunks(ctx context.Context, queryEmbedding []float32, topK int) ([]SearchResult, error) {
+	const q = `
+		SELECT d.path, c.content, c.embedding <=> $1 AS distance
+		FROM chunks c
+		JOIN documents d ON d.id = c.document_id
+		ORDER BY c.embedding <=> $1
+		LIMIT $2`
+
+	rows, err := s.pool.Query(ctx, q, pgvector.NewVector(queryEmbedding), topK)
+	if err != nil {
+		return nil, fmt.Errorf("search chunks: %w", err)
+	}
+	defer rows.Close()
+
+	var results []SearchResult
+	for rows.Next() {
+		var r SearchResult
+		if err := rows.Scan(&r.Source, &r.Content, &r.Distance); err != nil {
+			return nil, fmt.Errorf("scan search result: %w", err)
+		}
+		results = append(results, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate search results: %w", err)
+	}
+	return results, nil
+}
+
 // CountChunks returns the total number of chunk rows, for tests and
 // smoke-testing ingestion.
 func (s *Store) CountChunks(ctx context.Context) (int, error) {
