@@ -11,6 +11,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	httpSwagger "github.com/swaggo/http-swagger/v2"
 
 	"github.com/MadonnaMat/go-rag-lab/internal/store"
 )
@@ -36,26 +37,42 @@ func NewRouter(h *Handler) http.Handler {
 	r.Use(middleware.Logger)
 	r.Get("/healthz", h.handleHealthz)
 	r.Post("/query", h.handleQuery)
+	r.Get("/swagger/*", httpSwagger.WrapHandler)
 	return r
 }
 
-type queryRequest struct {
+// QueryRequest is the POST /query request body.
+type QueryRequest struct {
 	Query string `json:"query"`
 	TopK  int    `json:"top_k"`
 }
 
-type queryResult struct {
+// QueryResult is one ranked chunk in a QueryResponse.
+type QueryResult struct {
 	Source   string  `json:"source"`
 	Content  string  `json:"content"`
 	Distance float64 `json:"distance"`
 }
 
-type queryResponse struct {
-	Results []queryResult `json:"results"`
+// QueryResponse is the POST /query response body.
+type QueryResponse struct {
+	Results []QueryResult `json:"results"`
 }
 
+// handleQuery godoc
+//
+//	@Summary		Search ingested chunks
+//	@Description	Embeds the query text with the same provider used at ingestion time, then returns the topK nearest chunks by cosine distance (nearest first).
+//	@Tags			query
+//	@Accept			json
+//	@Produce		json
+//	@Param			request	body		QueryRequest	true	"Query"
+//	@Success		200		{object}	QueryResponse
+//	@Failure		400		{object}	map[string]string
+//	@Failure		500		{object}	map[string]string
+//	@Router			/query [post]
 func (h *Handler) handleQuery(w http.ResponseWriter, r *http.Request) {
-	var req queryRequest
+	var req QueryRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
@@ -76,13 +93,19 @@ func (h *Handler) handleQuery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp := queryResponse{Results: make([]queryResult, len(results))}
+	resp := QueryResponse{Results: make([]QueryResult, len(results))}
 	for i, res := range results {
-		resp.Results[i] = queryResult{Source: res.Source, Content: res.Content, Distance: res.Distance}
+		resp.Results[i] = QueryResult{Source: res.Source, Content: res.Content, Distance: res.Distance}
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
 
+// handleHealthz godoc
+//
+//	@Summary	Health check
+//	@Tags		health
+//	@Success	200
+//	@Router		/healthz [get]
 func (h *Handler) handleHealthz(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }

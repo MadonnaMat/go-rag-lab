@@ -9,6 +9,10 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
+# Regenerates docs/ fresh from source annotations, same as `make build`'s
+# swagger prerequisite — Docker's build doesn't go through the Makefile, so
+# it needs its own regeneration step here.
+RUN go tool swag init -g cmd/serve/main.go -o docs
 RUN CGO_ENABLED=0 go build -o /out/ingest ./cmd/ingest
 RUN CGO_ENABLED=0 go build -o /out/serve ./cmd/serve
 RUN CGO_ENABLED=0 go build -o /out/migrate ./cmd/migrate

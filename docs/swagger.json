@@ -1,0 +1,115 @@
+{
+    "swagger": "2.0",
+    "info": {
+        "description": "Embeds a query and returns the nearest chunks from Postgres+pgvector.",
+        "title": "go-rag-lab Query API",
+        "contact": {},
+        "version": "1.0"
+    },
+    "basePath": "/",
+    "paths": {
+        "/healthz": {
+            "get": {
+                "tags": [
+                    "health"
+                ],
+                "summary": "Health check",
+                "responses": {
+                    "200": {
+                        "description": "OK"
+                    }
+                }
+            }
+        },
+        "/query": {
+            "post": {
+                "description": "Embeds the query text with the same provider used at ingestion time, then returns the topK nearest chunks by cosine distance (nearest first).",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "query"
+                ],
+                "summary": "Search ingested chunks",
+                "parameters": [
+                    {
+                        "description": "Query",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/api.QueryRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/api.QueryResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "definitions": {
+        "api.QueryRequest": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string"
+                },
+                "top_k": {
+                    "type": "integer"
+                }
+            }
+        },
+        "api.QueryResponse": {
+            "type": "object",
+            "properties": {
+                "results": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/api.QueryResult"
+                    }
+                }
+            }
+        },
+        "api.QueryResult": {
+            "type": "object",
+            "properties": {
+                "content": {
+                    "type": "string"
+                },
+                "distance": {
+                    "type": "number"
+                },
+                "source": {
+                    "type": "string"
+                }
+            }
+        }
+    }
+}

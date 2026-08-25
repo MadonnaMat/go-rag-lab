@@ -1,4 +1,4 @@
-.PHONY: build vet fmt fmt-check lint test test-unit up down ingest migrate migrate-down ci-verify
+.PHONY: build vet fmt fmt-check lint test test-unit up down ingest migrate migrate-down swagger ci-verify
 
 # Loads .env (if present) as real Make variables, exported to every
 # recipe's environment — a single source instead of each target having to
@@ -8,8 +8,19 @@ include .env
 export
 endif
 
-build:
+# swagger regenerates docs/ from current source annotations before every
+# build, so the shipped spec can't silently drift from what's committed —
+# there's nothing to check for staleness because it's always freshly
+# derived at build time.
+build: swagger
 	go build ./...
+
+# Regenerates docs/ (docs.go + swagger.json + swagger.yaml) from the
+# @-annotations in cmd/serve/main.go and internal/api/api.go, via the swag
+# tool tracked in go.mod's `tool` directive (Go 1.24+) — no separate global
+# install, resolved the same way any other module dependency is.
+swagger:
+	go tool swag init -g cmd/serve/main.go -o docs
 
 vet:
 	go vet ./...

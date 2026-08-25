@@ -99,10 +99,10 @@ func TestQueryEndToEnd(t *testing.T) {
 	defer resp.Body.Close()
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 
-	var got queryResponse
+	var got QueryResponse
 	require.NoError(t, json.NewDecoder(resp.Body).Decode(&got))
 
-	var mine []queryResult
+	var mine []QueryResult
 	for _, r := range got.Results {
 		if r.Source == path {
 			mine = append(mine, r)
