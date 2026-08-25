@@ -3,6 +3,9 @@ package chunk
 import (
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestSplit(t *testing.T) {
@@ -64,19 +67,11 @@ func TestSplit(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			got, err := Split(tc.text, tc.size, tc.overlap)
-			if err != nil {
-				t.Fatalf("Split returned unexpected error: %v", err)
-			}
-			if len(got) != len(tc.wantChunks) {
-				t.Fatalf("got %d chunks, want %d: %+v", len(got), len(tc.wantChunks), got)
-			}
+			require.NoError(t, err)
+			require.Len(t, got, len(tc.wantChunks))
 			for i, want := range tc.wantChunks {
-				if got[i].Text != want {
-					t.Errorf("chunk %d text = %q, want %q", i, got[i].Text, want)
-				}
-				if got[i].Index != i {
-					t.Errorf("chunk %d Index = %d, want %d", i, got[i].Index, i)
-				}
+				assert.Equal(t, want, got[i].Text, "chunk %d text", i)
+				assert.Equal(t, i, got[i].Index, "chunk %d Index", i)
 			}
 		})
 	}
@@ -97,9 +92,8 @@ func TestSplitErrors(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if _, err := Split("some text", tc.size, tc.overlap); err == nil {
-				t.Fatalf("Split(size=%d, overlap=%d) = nil error, want an error", tc.size, tc.overlap)
-			}
+			_, err := Split("some text", tc.size, tc.overlap)
+			require.Error(t, err)
 		})
 	}
 }

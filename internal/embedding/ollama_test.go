@@ -5,20 +5,18 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"sync/atomic"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestOllamaEmbed_Success(t *testing.T) {
 	var gotBody ollamaEmbedRequest
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/embed" {
-			t.Errorf("request path = %q, want /api/embed", r.URL.Path)
-		}
-		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
-			t.Fatalf("decode request body: %v", err)
-		}
+		assert.Equal(t, "/api/embed", r.URL.Path)
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&gotBody))
 		_ = json.NewEncoder(w).Encode(ollamaEmbedResponse{
 			Embeddings: [][]float32{{0.1, 0.2}, {0.3, 0.4}},
 		})
@@ -27,26 +25,13 @@ func TestOllamaEmbed_Success(t *testing.T) {
 
 	o := NewOllama(srv.URL, "nomic-embed-text")
 	got, err := o.Embed(context.Background(), []string{"first chunk", "second chunk"})
-	if err != nil {
-		t.Fatalf("Embed returned unexpected error: %v", err)
-	}
+	require.NoError(t, err)
 
-	if gotBody.Model != "nomic-embed-text" {
-		t.Errorf("request model = %q, want nomic-embed-text", gotBody.Model)
-	}
-	if len(gotBody.Input) != 2 || gotBody.Input[0] != "first chunk" || gotBody.Input[1] != "second chunk" {
-		t.Errorf("request input = %v, want [first chunk second chunk]", gotBody.Input)
-	}
+	assert.Equal(t, "nomic-embed-text", gotBody.Model)
+	assert.Equal(t, []string{"first chunk", "second chunk"}, gotBody.Input)
 
 	want := [][]float32{{0.1, 0.2}, {0.3, 0.4}}
-	if len(got) != len(want) {
-		t.Fatalf("got %d embeddings, want %d", len(got), len(want))
-	}
-	for i := range want {
-		if len(got[i]) != len(want[i]) || got[i][0] != want[i][0] || got[i][1] != want[i][1] {
-			t.Errorf("embedding %d = %v, want %v", i, got[i], want[i])
-		}
-	}
+	assert.Equal(t, want, got)
 }
 
 func TestOllamaEmbed_NonOKStatus(t *testing.T) {
@@ -58,12 +43,8 @@ func TestOllamaEmbed_NonOKStatus(t *testing.T) {
 
 	o := NewOllama(srv.URL, "nomic-embed-text")
 	_, err := o.Embed(context.Background(), []string{"text"})
-	if err == nil {
-		t.Fatal("Embed returned nil error, want an error for a 500 response")
-	}
-	if !strings.Contains(err.Error(), "500") {
-		t.Errorf("error = %q, want it to mention the 500 status", err.Error())
-	}
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "500")
 }
 
 func TestOllamaEmbed_MalformedResponse(t *testing.T) {
@@ -73,9 +54,8 @@ func TestOllamaEmbed_MalformedResponse(t *testing.T) {
 	defer srv.Close()
 
 	o := NewOllama(srv.URL, "nomic-embed-text")
-	if _, err := o.Embed(context.Background(), []string{"text"}); err == nil {
-		t.Fatal("Embed returned nil error, want an error for a malformed response body")
-	}
+	_, err := o.Embed(context.Background(), []string{"text"})
+	require.Error(t, err)
 }
 
 func TestOllamaEmbed_EmptyInputMakesNoRequest(t *testing.T) {
@@ -87,15 +67,9 @@ func TestOllamaEmbed_EmptyInputMakesNoRequest(t *testing.T) {
 
 	o := NewOllama(srv.URL, "nomic-embed-text")
 	got, err := o.Embed(context.Background(), nil)
-	if err != nil {
-		t.Fatalf("Embed returned unexpected error: %v", err)
-	}
-	if got != nil {
-		t.Errorf("Embed(nil) = %v, want nil", got)
-	}
-	if hit.Load() {
-		t.Error("Embed made an HTTP request for empty input, want none")
-	}
+	require.NoError(t, err)
+	assert.Nil(t, got)
+	assert.False(t, hit.Load(), "Embed made an HTTP request for empty input, want none")
 }
 
 func TestOllamaEmbed_CanceledContext(t *testing.T) {
@@ -108,7 +82,6 @@ func TestOllamaEmbed_CanceledContext(t *testing.T) {
 	cancel()
 
 	o := NewOllama(srv.URL, "nomic-embed-text")
-	if _, err := o.Embed(ctx, []string{"text"}); err == nil {
-		t.Fatal("Embed returned nil error, want an error for an already-canceled context")
-	}
+	_, err := o.Embed(ctx, []string{"text"})
+	require.Error(t, err)
 }
