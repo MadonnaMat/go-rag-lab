@@ -47,6 +47,8 @@ func NewRouter(h *Handler) http.Handler {
 	r.Get("/healthz", h.handleHealthz)
 	r.Get("/query", h.handleQuery)
 	r.Post("/chat", h.handleChat)
+	r.Get("/", h.handleChatPage)
+	r.Handle("/static/*", http.StripPrefix("/static/", http.FileServerFS(staticFS)))
 	r.Get("/swagger/*", httpSwagger.WrapHandler)
 	return r
 }
