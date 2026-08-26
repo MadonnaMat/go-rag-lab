@@ -6,10 +6,12 @@ set -euo pipefail
 # service against them twice, asserting on the resulting database state
 # directly each time — not just that the container exited 0. Confirms
 # real rows land, and that re-running replaces them rather than
-# duplicating them. Finally brings up the containerized serve service and
-# makes a real /query call against the real ingested data through the real
-# Ollama, asserting on the ranked result — the one tier of testing that
-# needs a live embedding model, so it lives here rather than in `make test`.
+# duplicating them. Then brings up the containerized serve service and
+# makes real /query and /chat calls against the real ingested data through
+# the real (CI-sized) Ollama models, asserting on the results — the one
+# tier of testing that needs live models, so it lives here rather than in
+# `make test`. /chat uses qwen3:0.6b (baked into the CI Ollama image),
+# not the qwen3:8b default — see docker/ollama-ci/Dockerfile for why.
 
 POSTGRES_USER="${POSTGRES_USER:-rag}"
 POSTGRES_DB="${POSTGRES_DB:-rag}"
@@ -30,7 +32,10 @@ sql_count() {
 run_ingest() {
   # --exit-code-from makes `up`'s own exit status match app's, instead of
   # always returning 0 regardless of how the container actually exited.
-  OLLAMA_URL=http://ollama:11434 docker compose up --build --exit-code-from app app
+  # OLLAMA_CHAT_MODEL=qwen3:0.6b so corpus-summary generation
+  # (internal/chat.OllamaChat.Summarize) uses the CI-sized model too.
+  OLLAMA_URL=http://ollama:11434 OLLAMA_CHAT_MODEL=qwen3:0.6b \
+    docker compose up --build --exit-code-from app app
 }
 
 echo "== First ingestion run =="
@@ -61,7 +66,8 @@ echo "OK: containerized ingestion produced $docs1 documents / $chunks1 chunks, s
 
 echo
 echo "== Query API smoke test (serve + real Ollama) =="
-OLLAMA_URL=http://ollama:11434 docker compose up -d --build serve
+OLLAMA_URL=http://ollama:11434 OLLAMA_CHAT_MODEL=qwen3:0.6b \
+  docker compose up -d --build serve
 
 # serve's image is distroless/static (no shell, no curl/wget inside the
 # container to back a docker-compose healthcheck), so poll it from out here
@@ -84,3 +90,22 @@ fi
 
 echo
 echo "OK: containerized query API returned the expected top match"
+
+echo
+echo "== Chat API smoke test (serve + real Ollama, qwen3:0.6b) =="
+chat_response=$(curl -fsS --max-time 120 -X POST "http://localhost:$SERVER_PORT/chat" \
+  -H "Content-Type: application/json" \
+  -d '{"messages":[{"role":"user","content":"How did the Ulmarin develop technology without fire or metal? Use the retrieve_documents tool to find out."}]}')
+echo "$chat_response"
+
+if ! echo "$chat_response" | grep -q 'event: tool_call'; then
+  echo "FAIL: expected a tool_call event naming retrieve_documents, got: $chat_response" >&2
+  exit 1
+fi
+if ! echo "$chat_response" | grep -q 'event: done'; then
+  echo "FAIL: expected the stream to end with a done event, got: $chat_response" >&2
+  exit 1
+fi
+
+echo
+echo "OK: containerized chat API called retrieve_documents and completed the stream"

@@ -17,6 +17,7 @@
            clickable to send /compact (same as typing it) once it's known. -->
       <button
         type="button"
+        id="context-indicator"
         @click="compact()"
         :disabled="streaming || contextTokens === null"
         :title="contextTokens === null ? 'No context usage reported yet' : `${usedTokens} / ${contextTokens} tokens — click to compact`"
@@ -29,15 +30,16 @@
             :style="`width: ${usagePercent()}%`"
           ></span>
         </span>
-        <span x-text="contextTokens === null ? '—' : `${usagePercent()}%`"></span>
+        <span id="context-indicator-text" x-text="contextTokens === null ? '—' : `${usagePercent()}%`"></span>
       </button>
     </header>
 
-    <main class="flex-1 space-y-4 overflow-y-auto px-4 py-4">
+    <main id="messages" class="flex-1 space-y-4 overflow-y-auto px-4 py-4">
       <template x-for="(m, i) in messages" :key="i">
         <div>
           <div
-            class="max-w-[85%] rounded-lg px-3 py-2 whitespace-pre-wrap"
+            class="message max-w-[85%] rounded-lg px-3 py-2 whitespace-pre-wrap"
+            :data-role="m.role"
             :class="m.role === 'user' ? 'ml-auto bg-sky-700' : 'bg-slate-800'"
             x-text="m.content"
           ></div>
@@ -57,9 +59,10 @@
     </main>
 
     <footer class="border-t border-slate-800 p-4">
-      <form @submit.prevent="send()" class="flex gap-2">
+      <form id="chat-form" @submit.prevent="send()" class="flex gap-2">
         <input
           type="text"
+          id="chat-input"
           x-model="input"
           :disabled="streaming"
           placeholder="Ask about the ingested documents... (or type /compact)"
@@ -67,13 +70,14 @@
         >
         <button
           type="submit"
+          id="chat-send"
           :disabled="streaming || !input.trim()"
           class="rounded bg-sky-700 px-4 py-2 text-sm font-medium disabled:opacity-40"
         >
           Send
         </button>
       </form>
-      <p x-show="errorMessage" x-text="errorMessage" class="mt-2 text-xs text-red-400"></p>
+      <p id="chat-error" x-show="errorMessage" x-text="errorMessage" class="mt-2 text-xs text-red-400"></p>
     </footer>
   </div>
 

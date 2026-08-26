@@ -1,4 +1,4 @@
-.PHONY: build vet fmt fmt-check lint test test-unit up down ingest migrate migrate-down swagger dev-up ci-verify
+.PHONY: build vet fmt fmt-check lint test test-unit test-web up down ingest migrate migrate-down swagger dev-up ci-verify
 
 # Loads .env (if present) as real Make variables, exported to every
 # recipe's environment — a single source instead of each target having to
@@ -55,6 +55,15 @@ test-unit: swagger
 test: swagger
 	DATABASE_URL="$(TEST_DATABASE_URL)" go run ./cmd/migrate
 	DATABASE_URL="$(TEST_DATABASE_URL)" go test ./... -v
+
+# Headless-Chrome browser tests for the HTMX/Alpine.js frontend
+# (internal/api/web_test.go, via chromedp) — a separate target, not
+# folded into `test`, since it needs Chrome/Chromium installed locally
+# (common on a dev machine, not assumed for a minimal server
+# environment) rather than just Postgres. Self-skips via t.Skip if no
+# Chrome/Chromium binary is found on PATH.
+test-web: swagger
+	go test ./internal/api/... -run TestWeb -v
 
 up:
 	docker compose up -d --wait db

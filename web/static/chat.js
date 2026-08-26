@@ -45,12 +45,17 @@ function chatApp() {
     async runTurn() {
       this.streaming = true;
       this.errorMessage = "";
-      const assistantMsg = { role: "assistant", content: "", status: [] };
-      this.messages.push(assistantMsg);
 
-      const history = this.messages
-        .filter((m) => m !== assistantMsg)
-        .map((m) => ({ role: m.role, content: m.content }));
+      // Snapshot history *before* pushing the in-progress assistant
+      // placeholder, so there's no need to filter it back out.
+      const history = this.messages.map((m) => ({ role: m.role, content: m.content }));
+
+      // Alpine wraps pushed objects in its own reactive proxy — the array
+      // element is NOT the same object reference as the one just pushed,
+      // so later mutations must go through this.messages[idx], never a
+      // held reference to the plain object, or they won't trigger a
+      // re-render.
+      const idx = this.messages.push({ role: "assistant", content: "", status: [] }) - 1;
 
       try {
         const resp = await fetch("/chat", {
@@ -76,7 +81,7 @@ function chatApp() {
           while ((sep = buf.indexOf("\n\n")) !== -1) {
             const frame = buf.slice(0, sep);
             buf = buf.slice(sep + 2);
-            this.handleFrame(frame, assistantMsg);
+            this.handleFrame(frame, idx);
           }
         }
       } catch (err) {
@@ -86,7 +91,8 @@ function chatApp() {
       }
     },
 
-    handleFrame(frame, assistantMsg) {
+    handleFrame(frame, idx) {
+      const assistantMsg = this.messages[idx];
       let event = "message";
       const dataLines = [];
       for (const line of frame.split("\n")) {
