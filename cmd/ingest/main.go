@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"log"
 
+	"github.com/MadonnaMat/go-rag-lab/internal/chat"
 	"github.com/MadonnaMat/go-rag-lab/internal/config"
 	"github.com/MadonnaMat/go-rag-lab/internal/embedding"
 	"github.com/MadonnaMat/go-rag-lab/internal/ingest"
@@ -53,6 +54,7 @@ func run(dir string) error {
 	ing := &ingest.Ingester{
 		Store:        s,
 		Provider:     provider,
+		Summarizer:   chat.NewOllamaChat(cfg.OllamaURL, cfg.OllamaChatModel),
 		ChunkSize:    cfg.ChunkSize,
 		ChunkOverlap: cfg.ChunkOverlap,
 	}

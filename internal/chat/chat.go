@@ -2,7 +2,6 @@ package chat
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -189,7 +188,7 @@ func (c *Chatter) streamTurn(ctx context.Context, messages []chatMessage, emit f
 	var draft chatMessage
 	var sawToolCall bool
 
-	err := c.Client.Chat(ctx, messages, []toolDef{retrieveToolDef()}, func(line chatStreamLine) error {
+	err := c.Client.Chat(ctx, messages, availableTools(), func(line chatStreamLine) error {
 		if len(line.Message.ToolCalls) > 0 {
 			sawToolCall = true
 			draft.ToolCalls = append(draft.ToolCalls, line.Message.ToolCalls...)
@@ -211,51 +210,16 @@ func (c *Chatter) streamTurn(ctx context.Context, messages []chatMessage, emit f
 	return draft, sawToolCall, err
 }
 
-// executeToolCalls runs each tool call (only retrieve_documents is
-// known), emitting EventToolCall/EventToolResult, and returns the
-// role:"tool" messages to append to the conversation.
+// executeToolCalls dispatches each tool call by name (see tools.go),
+// returning the role:"tool" messages to append to the conversation.
 func (c *Chatter) executeToolCalls(ctx context.Context, calls []toolCall, emit func(Event) error) ([]chatMessage, error) {
 	out := make([]chatMessage, 0, len(calls))
 	for _, tc := range calls {
-		if tc.Function.Name != retrieveToolName {
-			out = append(out, chatMessage{
-				Role:     "tool",
-				ToolName: tc.Function.Name,
-				Content:  fmt.Sprintf(`{"error":"unknown tool %q"}`, tc.Function.Name),
-			})
-			continue
-		}
-
-		query, _ := tc.Function.Arguments["query"].(string)
-		topK := c.DefaultTopK
-		if v, ok := tc.Function.Arguments["top_k"].(float64); ok && v > 0 {
-			topK = int(v)
-		}
-
-		if err := emit(Event{Type: EventToolCall, ToolName: tc.Function.Name, ToolArgs: tc.Function.Arguments}); err != nil {
-			return nil, err
-		}
-
-		results, err := c.Retriever.Query(ctx, query, topK)
+		msg, err := c.dispatchTool(ctx, tc, emit)
 		if err != nil {
-			out = append(out, chatMessage{
-				Role:     "tool",
-				ToolName: tc.Function.Name,
-				Content:  fmt.Sprintf(`{"error":%q}`, err.Error()),
-			})
-			if err := emit(Event{Type: EventToolResult, ToolResult: nil}); err != nil {
-				return nil, err
-			}
-			continue
-		}
-
-		chunks := toResultChunks(results)
-		if err := emit(Event{Type: EventToolResult, ToolResult: chunks}); err != nil {
 			return nil, err
 		}
-
-		payload, _ := json.Marshal(chunks)
-		out = append(out, chatMessage{Role: "tool", ToolName: tc.Function.Name, Content: string(payload)})
+		out = append(out, msg)
 	}
 	return out, nil
 }
@@ -278,12 +242,4 @@ func (c *Chatter) finalize(ctx context.Context, messages []chatMessage, draftCon
 func (c *Chatter) emitFatal(emit func(Event) error, err error) error {
 	_ = emit(Event{Type: EventError, Err: err})
 	return err
-}
-
-func toResultChunks(results []store.SearchResult) []toolResultChunk {
-	out := make([]toolResultChunk, len(results))
-	for i, r := range results {
-		out[i] = toolResultChunk{Source: r.Source, Content: r.Content, Distance: r.Distance}
-	}
-	return out
 }
