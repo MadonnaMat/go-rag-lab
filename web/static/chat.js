@@ -7,7 +7,7 @@
 // declarative markup on this page; it isn't doing the streaming.
 function chatApp() {
   return {
-    messages: [], // {role, content, status: []}
+    messages: [], // {role, content, status: ""}
     input: "",
     streaming: false,
     errorMessage: "",
@@ -30,7 +30,7 @@ function chatApp() {
       const text = this.input.trim();
       if (!text || this.streaming) return;
       this.input = "";
-      this.messages.push({ role: "user", content: text, status: [] });
+      this.messages.push({ role: "user", content: text, status: "" });
       this.runTurn();
     },
 
@@ -38,7 +38,7 @@ function chatApp() {
     // server-side path as a user typing /compact themselves.
     compact() {
       if (this.streaming || this.contextTokens === null) return;
-      this.messages.push({ role: "user", content: "/compact", status: [] });
+      this.messages.push({ role: "user", content: "/compact", status: "" });
       this.runTurn();
     },
 
@@ -55,7 +55,7 @@ function chatApp() {
       // so later mutations must go through this.messages[idx], never a
       // held reference to the plain object, or they won't trigger a
       // re-render.
-      const idx = this.messages.push({ role: "assistant", content: "", status: [] }) - 1;
+      const idx = this.messages.push({ role: "assistant", content: "", status: "" }) - 1;
 
       try {
         const resp = await fetch("/chat", {
@@ -109,22 +109,25 @@ function chatApp() {
 
       switch (event) {
         case "thinking":
-          this.setStatus(assistantMsg, "Thinking…");
+          // Fires once per reasoning-token delta (often dozens of times
+          // per turn) — there's only ever one status line, so this just
+          // keeps replacing it rather than piling up.
+          this.setStatus(idx, "Thinking…");
           break;
         case "tool_call":
-          this.setStatus(assistantMsg, `Searching documents: "${(data.args && data.args.query) || ""}"…`);
+          this.setStatus(idx, `Searching documents: "${(data.args && data.args.query) || ""}"…`);
           break;
         case "tool_result":
-          this.setStatus(assistantMsg, `Found ${(data.results || []).length} matching chunk(s).`);
+          this.setStatus(idx, `Found ${(data.results || []).length} matching chunk(s).`);
           break;
         case "compacting":
-          this.setStatus(assistantMsg, "Summarizing earlier conversation…");
+          this.setStatus(idx, "Summarizing earlier conversation…");
           break;
         case "compacted":
-          this.setStatus(assistantMsg, data.summary ? `Compacted: ${data.summary}` : "Compacted.");
+          this.setStatus(idx, data.summary ? `Compacted: ${data.summary}` : "Compacted.");
           break;
         case "verifying":
-          this.setStatus(assistantMsg, "Double-checking the answer…");
+          this.setStatus(idx, "Double-checking the answer…");
           break;
         case "revised":
           assistantMsg.content = data.content || "";
@@ -139,13 +142,22 @@ function chatApp() {
         case "error":
           this.errorMessage = data.error || "unknown error";
           break;
+        case "done":
+          // Show "Done!" briefly, then clear the status line on its own.
+          this.setStatus(idx, "Done!");
+          setTimeout(() => this.setStatus(idx, ""), 2000);
+          break;
         default:
           break;
       }
     },
 
-    setStatus(assistantMsg, text) {
-      assistantMsg.status.push(text);
+    // Replaces the single status line for the assistant message at idx —
+    // always looked up fresh through this.messages (not a held object
+    // reference), the same reactivity requirement runTurn's comment
+    // explains, since this also runs later from a setTimeout callback.
+    setStatus(idx, text) {
+      this.messages[idx].status = text;
     },
   };
 }

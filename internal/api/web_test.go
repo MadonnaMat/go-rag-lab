@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"net/http/httptest"
 	"os/exec"
 	"testing"
@@ -44,13 +45,20 @@ func newChromedpContext(t *testing.T) context.Context {
 // real HTTP listener (real templates/static from web.FS) with a scripted
 // fake Chatter — no real Ollama or Postgres. Proves the DOM actually
 // updates as the SSE stream plays: streamed tokens land in the assistant
-// bubble in order, and the context-usage indicator reflects the reported
-// usage.
+// bubble in order, the context-usage indicator reflects the reported
+// usage, and there's a single status line that gets replaced (not
+// accumulated) as the turn progresses through its phases, ending on
+// "Done!" for a couple seconds before clearing itself.
 func TestWeb_ChatFlow(t *testing.T) {
 	requireChrome(t)
 
 	chatter := &fakeChatter{events: []chat.Event{
-		{Type: chat.EventThinking, Token: "thinking about it"},
+		// Real Ollama sends dozens of these per turn, one per reasoning
+		// token — there's only ever one status line, so these must all
+		// collapse into it rather than piling up a line per delta.
+		{Type: chat.EventThinking, Token: "thinking"},
+		{Type: chat.EventThinking, Token: " about"},
+		{Type: chat.EventThinking, Token: " it"},
 		{Type: chat.EventToolCall, ToolName: "retrieve_documents", ToolArgs: map[string]any{"query": "x"}},
 		{Type: chat.EventToolResult, ToolResult: nil},
 		{Type: chat.EventToken, Token: "Hello"},
@@ -64,7 +72,9 @@ func TestWeb_ChatFlow(t *testing.T) {
 	ctx, cancel := context.WithTimeout(newChromedpContext(t), 30*time.Second)
 	defer cancel()
 
-	var assistantText, indicatorText string
+	const statusSel = `#messages .message[data-role="assistant"] ~ p.status`
+
+	var assistantText, indicatorText, doneStatus string
 	err := chromedp.Run(ctx,
 		chromedp.Navigate(srv.URL+"/"),
 		chromedp.WaitVisible("#chat-input", chromedp.ByQuery),
@@ -76,13 +86,26 @@ func TestWeb_ChatFlow(t *testing.T) {
 		chromedp.WaitEnabled("#chat-input", chromedp.ByQuery),
 		chromedp.Text(`#messages .message[data-role="assistant"]`, &assistantText, chromedp.ByQuery),
 		chromedp.Text("#context-indicator-text", &indicatorText, chromedp.ByQuery),
+		// "done" fires right before streaming flips off, so the "Done!"
+		// status should already be showing here.
+		chromedp.Text(statusSel, &doneStatus, chromedp.ByQuery),
 	)
 	require.NoError(t, err)
 
 	assert.Equal(t, "Hello world", assistantText)
 	assert.Equal(t, "50%", indicatorText)
+	assert.Equal(t, "Done!", doneStatus)
 	require.Len(t, chatter.gotHist, 1)
 	assert.Equal(t, "how does X work?", chatter.gotHist[0].Content)
+
+	// The status line clears itself ~2s after showing "Done!".
+	var stillVisible bool
+	err = chromedp.Run(ctx,
+		chromedp.Sleep(2200*time.Millisecond),
+		chromedp.EvaluateAsDevTools(fmt.Sprintf(`(() => { const el = document.querySelector(%q); return !!el && el.offsetParent !== null; })()`, statusSel), &stillVisible),
+	)
+	require.NoError(t, err)
+	assert.False(t, stillVisible, "status line should have cleared itself after ~2s")
 }
 
 // TestWeb_CompactIndicatorClick proves clicking the context-usage
