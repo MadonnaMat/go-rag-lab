@@ -9,11 +9,13 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	httpSwagger "github.com/swaggo/http-swagger/v2"
 
+	"github.com/MadonnaMat/go-rag-lab/internal/chat"
 	"github.com/MadonnaMat/go-rag-lab/internal/store"
 )
 
@@ -24,9 +26,15 @@ type Retriever interface {
 	Query(ctx context.Context, q string, topK int) ([]store.SearchResult, error)
 }
 
+// Chatter is the subset of *chat.Chatter the HTTP layer needs.
+type Chatter interface {
+	Run(ctx context.Context, history []chat.Message, emit func(chat.Event) error) error
+}
+
 // Handler holds the HTTP layer's dependencies.
 type Handler struct {
 	Retriever Retriever
+	Chatter   Chatter
 	// DefaultTopK is used when a request omits top_k (or sets it <= 0).
 	DefaultTopK int
 }
@@ -38,6 +46,7 @@ func NewRouter(h *Handler) http.Handler {
 	r.Use(middleware.Logger)
 	r.Get("/healthz", h.handleHealthz)
 	r.Get("/query", h.handleQuery)
+	r.Post("/chat", h.handleChat)
 	r.Get("/swagger/*", httpSwagger.WrapHandler)
 	return r
 }
@@ -96,6 +105,70 @@ func (h *Handler) handleQuery(w http.ResponseWriter, r *http.Request) {
 		resp.Results[i] = QueryResult{Source: res.Source, Content: res.Content, Distance: res.Distance}
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// ChatMessage is one turn in a client-supplied conversation history.
+type ChatMessage struct {
+	Role    string `json:"role"` // "user" or "assistant" only — a "system" role is rejected
+	Content string `json:"content"`
+}
+
+// ChatRequest is the POST /chat request body — the full conversation so
+// far. Chat is stateless: the server holds no session state, so the
+// client resends the whole history each request.
+type ChatRequest struct {
+	Messages []ChatMessage `json:"messages"`
+}
+
+// handleChat godoc
+//
+//	@Summary		Tool-calling RAG chat
+//	@Description	Streams a chat response over Server-Sent Events. The model may call a document-retrieval tool zero or more times before producing a final answer. Event types: tool_call, tool_result, thinking, token, compacted, verifying, revised, context_usage, done, error. Swag/OpenAPI 2.0 can't represent an SSE event stream's per-event payloads, so only the request body is documented here.
+//	@Tags			chat
+//	@Accept			json
+//	@Produce		text/event-stream
+//	@Param			request	body		ChatRequest	true	"Conversation history"
+//	@Success		200		{string}	string		"text/event-stream"
+//	@Failure		400		{object}	map[string]string
+//	@Router			/chat [post]
+func (h *Handler) handleChat(w http.ResponseWriter, r *http.Request) {
+	var req ChatRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if len(req.Messages) == 0 {
+		writeError(w, http.StatusBadRequest, "messages must not be empty")
+		return
+	}
+	for _, m := range req.Messages {
+		if strings.EqualFold(m.Role, "system") {
+			writeError(w, http.StatusBadRequest, "system-role messages are not accepted from clients")
+			return
+		}
+	}
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "streaming unsupported")
+		return
+	}
+
+	history := make([]chat.Message, len(req.Messages))
+	for i, m := range req.Messages {
+		history[i] = chat.Message{Role: m.Role, Content: m.Content}
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.WriteHeader(http.StatusOK)
+
+	enc := sseEncoder{w: w, flusher: flusher}
+	err := h.Chatter.Run(r.Context(), history, enc.write)
+	if err != nil && r.Context().Err() == nil {
+		_ = enc.writeError(err)
+	}
 }
 
 // handleHealthz godoc

@@ -54,7 +54,8 @@ const (
 	EventToolResult
 	EventThinking
 	EventToken
-	EventCompacted
+	EventCompacting // the summarization call is running (no output yet)
+	EventCompacted  // compaction finished; Summary holds the result
 	EventVerifying
 	EventRevised
 	EventContextUsage
@@ -119,6 +120,9 @@ func (c *Chatter) buildInitialMessages(ctx context.Context, history []Message) [
 // messages regardless of the usual threshold and returns without calling
 // the model at all.
 func (c *Chatter) runCompactCommand(ctx context.Context, messages []chatMessage, emit func(Event) error) error {
+	if err := emit(Event{Type: EventCompacting}); err != nil {
+		return err
+	}
 	compacted, summary := c.compact(ctx, messages)
 	if err := emit(Event{Type: EventCompacted, Summary: summary}); err != nil {
 		return err
@@ -169,6 +173,7 @@ func (c *Chatter) maybeCompact(ctx context.Context, messages []chatMessage, emit
 	if c.ContextTokens <= 0 || estimateTokens(messages) <= int(compactThreshold*float64(c.ContextTokens)) {
 		return messages
 	}
+	_ = emit(Event{Type: EventCompacting})
 	compacted, summary := c.compact(ctx, messages)
 	if summary == "" {
 		return messages

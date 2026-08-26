@@ -212,6 +212,7 @@ func TestRun_CompactCommandSkipsModel(t *testing.T) {
 
 	events := collectEvents(t, c, history)
 	types := eventTypes(events)
+	require.Contains(t, types, EventCompacting)
 	require.Contains(t, types, EventCompacted)
 	require.Contains(t, types, EventContextUsage)
 	assert.Equal(t, EventDone, types[len(types)-1])
