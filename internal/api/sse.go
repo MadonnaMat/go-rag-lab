@@ -29,6 +29,10 @@ type sseToolResultChunk struct {
 
 type sseToolResultPayload struct {
 	Results []sseToolResultChunk `json:"results"`
+	// Error is set instead of Results when the tool call itself failed
+	// (e.g. the retriever errored) — distinguishes "the search legitimately
+	// found nothing" from "the search couldn't run".
+	Error string `json:"error,omitempty"`
 }
 
 type sseThinkingPayload struct {
@@ -62,6 +66,9 @@ func (e *sseEncoder) write(ev chat.Event) error {
 	case chat.EventToolCall:
 		return e.frame("tool_call", sseToolCallPayload{Tool: ev.ToolName, Args: ev.ToolArgs})
 	case chat.EventToolResult:
+		if ev.Err != nil {
+			return e.frame("tool_result", sseToolResultPayload{Error: ev.Err.Error()})
+		}
 		results := make([]sseToolResultChunk, len(ev.ToolResult))
 		for i, r := range ev.ToolResult {
 			results[i] = sseToolResultChunk{Source: r.Source, Content: r.Content, Distance: r.Distance}

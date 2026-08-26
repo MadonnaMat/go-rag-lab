@@ -47,13 +47,22 @@ func (c *Chatter) compact(ctx context.Context, messages []chatMessage) ([]chatMe
 		return messages, ""
 	}
 
-	older := rest[:len(rest)-keepRecent]
-	recent := rest[len(rest)-keepRecent:]
+	// Split at a message boundary that doesn't separate an assistant
+	// tool_calls message from its role:"tool" responses — Ollama's
+	// /api/chat rejects a "tool" message with no preceding tool_calls in
+	// context. Walk the split point back over any run of "tool" messages
+	// so the whole call/response group stays together in recent.
+	splitAt := len(rest) - keepRecent
+	for splitAt > 0 && rest[splitAt].Role == "tool" {
+		splitAt--
+	}
+	older := rest[:splitAt]
+	recent := rest[splitAt:]
 
 	summarizeMessages := append([]chatMessage{{Role: "system", Content: prompts.Compact}}, older...)
 	summary, err := c.Client.chatOnce(ctx, summarizeMessages)
 	if err != nil {
-		dropped := len(rest) - keepRecent
+		dropped := splitAt
 		out := append([]chatMessage{}, head...)
 		out = append(out, recent...)
 		return out, fmt.Sprintf("dropped %d older message(s) (summarization failed: %v)", dropped, err)

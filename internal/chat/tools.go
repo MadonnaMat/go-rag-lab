@@ -22,11 +22,18 @@ func (c *Chatter) dispatchTool(ctx context.Context, tc toolCall, emit func(Event
 	case retrieveToolName:
 		return c.runRetrieveTool(ctx, tc, emit)
 	default:
+		if err := emit(Event{Type: EventToolCall, ToolName: tc.Function.Name, ToolArgs: tc.Function.Arguments}); err != nil {
+			return chatMessage{}, err
+		}
+		toolErr := fmt.Errorf("unknown tool %q", tc.Function.Name)
+		if err := emit(Event{Type: EventToolResult, Err: toolErr}); err != nil {
+			return chatMessage{}, err
+		}
 		return chatMessage{
 			Role:       "tool",
 			ToolName:   tc.Function.Name,
 			ToolCallID: tc.ID,
-			Content:    fmt.Sprintf(`{"error":"unknown tool %q"}`, tc.Function.Name),
+			Content:    fmt.Sprintf(`{"error":%q}`, toolErr.Error()),
 		}, nil
 	}
 }

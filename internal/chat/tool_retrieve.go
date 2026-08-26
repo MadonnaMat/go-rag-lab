@@ -48,7 +48,6 @@ type toolResultChunk struct {
 // fed back to the model as a structured error rather than failing the
 // whole request.
 func (c *Chatter) runRetrieveTool(ctx context.Context, tc toolCall, emit func(Event) error) (chatMessage, error) {
-	query, _ := tc.Function.Arguments["query"].(string)
 	topK := c.DefaultTopK
 	if v, ok := tc.Function.Arguments["top_k"].(float64); ok && v > 0 {
 		topK = int(v)
@@ -58,9 +57,23 @@ func (c *Chatter) runRetrieveTool(ctx context.Context, tc toolCall, emit func(Ev
 		return chatMessage{}, err
 	}
 
+	query, ok := tc.Function.Arguments["query"].(string)
+	if !ok || query == "" {
+		toolErr := fmt.Errorf("missing or invalid required argument %q", "query")
+		if emitErr := emit(Event{Type: EventToolResult, Err: toolErr}); emitErr != nil {
+			return chatMessage{}, emitErr
+		}
+		return chatMessage{
+			Role:       "tool",
+			ToolName:   tc.Function.Name,
+			ToolCallID: tc.ID,
+			Content:    fmt.Sprintf(`{"error":%q}`, toolErr.Error()),
+		}, nil
+	}
+
 	results, err := c.Retriever.Query(ctx, query, topK)
 	if err != nil {
-		if emitErr := emit(Event{Type: EventToolResult, ToolResult: nil}); emitErr != nil {
+		if emitErr := emit(Event{Type: EventToolResult, Err: err}); emitErr != nil {
 			return chatMessage{}, emitErr
 		}
 		return chatMessage{

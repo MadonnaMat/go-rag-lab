@@ -118,7 +118,12 @@ function chatApp() {
           this.setStatus(idx, `Searching documents: "${(data.args && data.args.query) || ""}"…`);
           break;
         case "tool_result":
-          this.setStatus(idx, `Found ${(data.results || []).length} matching chunk(s).`);
+          this.setStatus(
+            idx,
+            data.error
+              ? `Search failed: ${data.error}`
+              : `Found ${(data.results || []).length} matching chunk(s).`
+          );
           break;
         case "compacting":
           this.setStatus(idx, "Summarizing earlier conversation…");

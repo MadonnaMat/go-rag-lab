@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/MadonnaMat/go-rag-lab/internal/chunk"
 	"github.com/MadonnaMat/go-rag-lab/internal/embedding"
@@ -80,7 +81,7 @@ func (ing *Ingester) IngestDir(ctx context.Context, dir string) (Result, error) 
 		return Result{}, err
 	}
 
-	newHash := dirHash(files)
+	newHash := dirHash(files, ing.ChunkSize, ing.ChunkOverlap)
 	prevHash, err := ing.Store.GetIngestDirHash(ctx)
 	if err != nil {
 		return Result{}, fmt.Errorf("get previous ingest hash: %w", err)
@@ -161,7 +162,7 @@ func (ing *Ingester) maybeGenerateCorpusSummary(ctx context.Context, result Resu
 		return nil
 	}
 	if len(sample) > maxSummarySampleChars {
-		sample = sample[:maxSummarySampleChars]
+		sample = truncateValidUTF8(sample, maxSummarySampleChars)
 	}
 	summary, err := ing.Summarizer.Summarize(ctx, sample)
 	if err != nil {
@@ -171,6 +172,19 @@ func (ing *Ingester) maybeGenerateCorpusSummary(ctx context.Context, result Resu
 		return fmt.Errorf("store corpus summary: %w", err)
 	}
 	return nil
+}
+
+// truncateValidUTF8 truncates s to at most n bytes without splitting a
+// multi-byte rune in half — a plain byte slice (s[:n]) can land mid-rune
+// and produce invalid UTF-8, which would then get fed to the Summarizer.
+func truncateValidUTF8(s string, n int) string {
+	if n >= len(s) {
+		return s
+	}
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return s[:n]
 }
 
 // ingestFile stores content under identity, its filename alone rather

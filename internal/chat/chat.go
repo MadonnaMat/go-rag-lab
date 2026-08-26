@@ -123,6 +123,9 @@ func (c *Chatter) runCompactCommand(ctx context.Context, messages []chatMessage,
 		return err
 	}
 	compacted, summary := c.compact(ctx, messages)
+	if summary == "" {
+		summary = "nothing to compact"
+	}
 	if err := emit(Event{Type: EventCompacted, Summary: summary}); err != nil {
 		return err
 	}

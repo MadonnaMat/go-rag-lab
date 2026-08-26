@@ -3,6 +3,7 @@ package api
 import (
 	"html/template"
 	"io/fs"
+	"log"
 	"net/http"
 
 	"github.com/MadonnaMat/go-rag-lab/web"
@@ -28,5 +29,11 @@ var staticFS = func() fs.FS {
 // handleHealthz.
 func (h *Handler) handleChatPage(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_ = chatPageTemplate.ExecuteTemplate(w, "chat.html", nil)
+	if err := chatPageTemplate.ExecuteTemplate(w, "chat.html", nil); err != nil {
+		// Headers/status are already written by the time ExecuteTemplate
+		// can fail partway through, so the response body may already be a
+		// truncated page — the best we can do here is make the failure
+		// visible in the server logs rather than swallow it silently.
+		log.Printf("handleChatPage: execute template: %v", err)
+	}
 }
