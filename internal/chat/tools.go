@@ -23,9 +23,10 @@ func (c *Chatter) dispatchTool(ctx context.Context, tc toolCall, emit func(Event
 		return c.runRetrieveTool(ctx, tc, emit)
 	default:
 		return chatMessage{
-			Role:     "tool",
-			ToolName: tc.Function.Name,
-			Content:  fmt.Sprintf(`{"error":"unknown tool %q"}`, tc.Function.Name),
+			Role:       "tool",
+			ToolName:   tc.Function.Name,
+			ToolCallID: tc.ID,
+			Content:    fmt.Sprintf(`{"error":"unknown tool %q"}`, tc.Function.Name),
 		}, nil
 	}
 }

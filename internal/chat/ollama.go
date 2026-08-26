@@ -45,14 +45,20 @@ func NewOllamaChat(baseURL, model string) *OllamaChat {
 }
 
 type chatMessage struct {
-	Role      string     `json:"role"`
-	Content   string     `json:"content"`
-	Thinking  string     `json:"thinking,omitempty"`
-	ToolCalls []toolCall `json:"tool_calls,omitempty"`
-	ToolName  string     `json:"tool_name,omitempty"`
+	Role       string     `json:"role"`
+	Content    string     `json:"content"`
+	Thinking   string     `json:"thinking,omitempty"`
+	ToolCalls  []toolCall `json:"tool_calls,omitempty"`
+	ToolName   string     `json:"tool_name,omitempty"`
+	ToolCallID string     `json:"tool_call_id,omitempty"`
 }
 
+// toolCall mirrors Ollama's wire format for a model-issued tool call —
+// confirmed against a real /api/chat response: {"id":"call_...",
+// "function":{"index":0,"name":"...","arguments":{...}}}. Index isn't
+// captured since nothing here needs it.
 type toolCall struct {
+	ID       string `json:"id,omitempty"`
 	Function struct {
 		Name      string         `json:"name"`
 		Arguments map[string]any `json:"arguments"`

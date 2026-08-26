@@ -64,9 +64,10 @@ func (c *Chatter) runRetrieveTool(ctx context.Context, tc toolCall, emit func(Ev
 			return chatMessage{}, emitErr
 		}
 		return chatMessage{
-			Role:     "tool",
-			ToolName: tc.Function.Name,
-			Content:  fmt.Sprintf(`{"error":%q}`, err.Error()),
+			Role:       "tool",
+			ToolName:   tc.Function.Name,
+			ToolCallID: tc.ID,
+			Content:    fmt.Sprintf(`{"error":%q}`, err.Error()),
 		}, nil
 	}
 
@@ -76,7 +77,7 @@ func (c *Chatter) runRetrieveTool(ctx context.Context, tc toolCall, emit func(Ev
 	}
 
 	payload, _ := json.Marshal(chunks)
-	return chatMessage{Role: "tool", ToolName: tc.Function.Name, Content: string(payload)}, nil
+	return chatMessage{Role: "tool", ToolName: tc.Function.Name, ToolCallID: tc.ID, Content: string(payload)}, nil
 }
 
 func toResultChunks(results []store.SearchResult) []toolResultChunk {
