@@ -16,6 +16,7 @@ type Config struct {
 	EmbeddingProvider string
 	OllamaURL         string
 	OllamaEmbedModel  string
+	OllamaChatModel   string
 	ChunkSize         int
 	ChunkOverlap      int
 	ServerAddr        string
@@ -61,10 +62,13 @@ func Load() (Config, error) {
 		// pre-baked model — see migrations/000001_init.up.sql's comment for
 		// why.
 		OllamaEmbedModel: getEnv("OLLAMA_EMBED_MODEL", "nomic-embed-text"),
-		ChunkSize:        chunkSize,
-		ChunkOverlap:     chunkOverlap,
-		ServerAddr:       getEnv("SERVER_ADDR", ":8080"),
-		TopK:             topK,
+		// Sized to stay under 8GB VRAM alongside the embedding model — see
+		// scripts/ollama-dev's chat-model pull step.
+		OllamaChatModel: getEnv("OLLAMA_CHAT_MODEL", "qwen3:8b"),
+		ChunkSize:       chunkSize,
+		ChunkOverlap:    chunkOverlap,
+		ServerAddr:      getEnv("SERVER_ADDR", ":8080"),
+		TopK:            topK,
 	}, nil
 }
 

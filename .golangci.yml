@@ -1,0 +1,26 @@
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  default: standard
+  enable:
+    - gocyclo
+    - funlen
+    - gocognit
+    - unconvert
+    - unparam
+  settings:
+    gocyclo:
+      min-complexity: 15
+    funlen:
+      lines: 80
+      statements: 60
+    gocognit:
+      min-complexity: 20
+
+formatters:
+  enable:
+    - gofmt
+    - goimports

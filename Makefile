@@ -27,12 +27,20 @@ vet: swagger
 	go vet ./...
 
 fmt:
-	gofmt -w .
+	./scripts/golangci-lint fmt
 
 fmt-check:
-	@test -z "$$(gofmt -l .)" || (gofmt -l . && echo "gofmt: files need formatting" && exit 1)
+	./scripts/golangci-lint fmt --diff
 
-lint: fmt-check vet
+# golangci-lint (github.com/golangci/golangci-lint/v2, tracked as a go.mod
+# tool dependency like swag — see .golangci.yml) subsumes gofmt/goimports
+# formatting checks and go vet, plus complexity linters (gocyclo, funlen,
+# gocognit) on top of its standard set — one command instead of
+# fmt-check + vet run separately. scripts/golangci-lint wraps `go tool
+# golangci-lint` so the Makefile and VS Code's Go extension (see
+# .vscode/settings.json) invoke the exact same pinned binary.
+lint: swagger
+	./scripts/golangci-lint run ./...
 
 # Unit tests only: force DATABASE_URL empty for this invocation so DB tests
 # self-skip via t.Skip, even if it's exported in the calling shell.

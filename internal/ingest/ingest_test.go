@@ -31,9 +31,10 @@ func (f *fakeProvider) Embed(ctx context.Context, texts []string) ([][]float32, 
 // fakeStore records what would have been persisted, so tests never need a
 // real Postgres.
 type fakeStore struct {
-	nextID      int64
-	documents   map[string]int64 // path -> id
-	chunksByDoc map[int64][]store.Chunk
+	nextID        int64
+	documents     map[string]int64 // path -> id
+	chunksByDoc   map[int64][]store.Chunk
+	corpusSummary string
 }
 
 func newFakeStore() *fakeStore {
@@ -41,6 +42,11 @@ func newFakeStore() *fakeStore {
 		documents:   map[string]int64{},
 		chunksByDoc: map[int64][]store.Chunk{},
 	}
+}
+
+func (f *fakeStore) UpsertCorpusSummary(ctx context.Context, summary string) error {
+	f.corpusSummary = summary
+	return nil
 }
 
 // UpsertDocument mirrors store.Store's real ON CONFLICT (path) DO UPDATE
@@ -142,6 +148,45 @@ func TestIngestDir_PropagatesProviderError(t *testing.T) {
 	}
 	_, err := ing.IngestDir(context.Background(), dir)
 	require.Error(t, err)
+}
+
+// fakeSummarizer records the sample it was called with and returns a
+// fixed summary, so tests never need a real Ollama chat server.
+type fakeSummarizer struct {
+	calls []string
+}
+
+func (f *fakeSummarizer) Summarize(ctx context.Context, sample string) (string, error) {
+	f.calls = append(f.calls, sample)
+	return "  a summary  ", nil
+}
+
+func TestIngestDir_GeneratesCorpusSummary(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "a.md", "hello world")
+
+	st := newFakeStore()
+	summarizer := &fakeSummarizer{}
+	ing := &Ingester{Store: st, Provider: &fakeProvider{}, Summarizer: summarizer, ChunkSize: 100, ChunkOverlap: 0}
+
+	_, err := ing.IngestDir(context.Background(), dir)
+	require.NoError(t, err)
+
+	require.Len(t, summarizer.calls, 1)
+	assert.Contains(t, summarizer.calls[0], "hello world")
+	assert.Equal(t, "a summary", st.corpusSummary, "should be trimmed before storing")
+}
+
+func TestIngestDir_NilSummarizerSkipsCorpusSummary(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "a.md", "hello world")
+
+	st := newFakeStore()
+	ing := &Ingester{Store: st, Provider: &fakeProvider{}, ChunkSize: 100, ChunkOverlap: 0}
+
+	_, err := ing.IngestDir(context.Background(), dir)
+	require.NoError(t, err)
+	assert.Empty(t, st.corpusSummary)
 }
 
 type erroringProvider struct{}

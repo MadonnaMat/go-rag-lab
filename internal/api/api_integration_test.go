@@ -96,7 +96,7 @@ func TestQueryEndToEnd(t *testing.T) {
 
 	resp, err := http.Get(srv.URL + "/query?" + url.Values{"query": {"anything"}}.Encode())
 	require.NoError(t, err)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 
 	var got QueryResponse

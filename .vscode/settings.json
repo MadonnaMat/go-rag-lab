@@ -1,0 +1,14 @@
+{
+  "go.lintTool": "golangci-lint-v2",
+  "go.alternateTools": {
+    "golangci-lint-v2": "${workspaceFolder}/scripts/golangci-lint"
+  },
+  "go.lintOnSave": "package",
+  "go.lintFlags": [],
+  "go.formatTool": "goimports",
+  "editor.formatOnSave": true,
+  "[go]": {
+    "editor.defaultFormatter": "golang.go",
+    "editor.formatOnSave": true
+  }
+}

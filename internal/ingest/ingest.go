@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/MadonnaMat/go-rag-lab/internal/chunk"
 	"github.com/MadonnaMat/go-rag-lab/internal/embedding"
@@ -23,11 +24,28 @@ import (
 type Store interface {
 	UpsertDocument(ctx context.Context, path, contentHash string) (int64, error)
 	ReplaceChunks(ctx context.Context, documentID int64, chunks []store.Chunk) error
+	UpsertCorpusSummary(ctx context.Context, summary string) error
 }
 
+// Summarizer generates a short description of sampled corpus content —
+// satisfied by *chat.OllamaChat.Summarize, kept as a local interface here
+// (rather than importing internal/chat) so ingestion doesn't depend on
+// the chat package for anything but this one call shape.
+type Summarizer interface {
+	Summarize(ctx context.Context, sample string) (string, error)
+}
+
+// maxSummarySampleChars caps how much ingested text gets sent to the
+// Summarizer in one call, keeping the corpus-summary request small
+// regardless of how much was ingested.
+const maxSummarySampleChars = 12000
+
 type Ingester struct {
-	Store        Store
-	Provider     embedding.Provider
+	Store    Store
+	Provider embedding.Provider
+	// Summarizer is optional; if nil, no corpus summary is generated (chat
+	// still works fine without one — see internal/chat.Chatter.Summaries).
+	Summarizer   Summarizer
 	ChunkSize    int
 	ChunkOverlap int
 }
@@ -57,15 +75,35 @@ func (ing *Ingester) IngestDir(ctx context.Context, dir string) (Result, error) 
 	}
 
 	var result Result
+	var sample strings.Builder
 	for _, name := range names {
 		diskPath := filepath.Join(dir, name)
-		n, err := ing.ingestFile(ctx, diskPath, name)
+		n, content, err := ing.ingestFile(ctx, diskPath, name)
 		if err != nil {
 			return result, fmt.Errorf("ingest %q: %w", diskPath, err)
 		}
 		result.Documents++
 		result.Chunks += n
+		if sample.Len() < maxSummarySampleChars {
+			sample.WriteString(content)
+			sample.WriteString("\n\n---\n\n")
+		}
 	}
+
+	if ing.Summarizer != nil && result.Documents > 0 {
+		sampleText := sample.String()
+		if len(sampleText) > maxSummarySampleChars {
+			sampleText = sampleText[:maxSummarySampleChars]
+		}
+		summary, err := ing.Summarizer.Summarize(ctx, sampleText)
+		if err != nil {
+			return result, fmt.Errorf("generate corpus summary: %w", err)
+		}
+		if err := ing.Store.UpsertCorpusSummary(ctx, strings.TrimSpace(summary)); err != nil {
+			return result, fmt.Errorf("store corpus summary: %w", err)
+		}
+	}
+
 	return result, nil
 }
 
@@ -82,10 +120,10 @@ func (ing *Ingester) IngestDir(ctx context.Context, dir string) (Result, error) 
 // to dir (e.g. via filepath.Rel(dir, diskPath)) instead — otherwise two
 // same-named files in different subdirectories would silently collide
 // under ON CONFLICT (path), one overwriting the other with no error.
-func (ing *Ingester) ingestFile(ctx context.Context, diskPath, identity string) (int, error) {
+func (ing *Ingester) ingestFile(ctx context.Context, diskPath, identity string) (int, string, error) {
 	content, err := os.ReadFile(diskPath)
 	if err != nil {
-		return 0, fmt.Errorf("read file: %w", err)
+		return 0, "", fmt.Errorf("read file: %w", err)
 	}
 
 	sum := sha256.Sum256(content)
@@ -93,7 +131,7 @@ func (ing *Ingester) ingestFile(ctx context.Context, diskPath, identity string) 
 
 	chunks, err := chunk.Split(string(content), ing.ChunkSize, ing.ChunkOverlap)
 	if err != nil {
-		return 0, fmt.Errorf("split into chunks: %w", err)
+		return 0, "", fmt.Errorf("split into chunks: %w", err)
 	}
 
 	texts := make([]string, len(chunks))
@@ -103,15 +141,15 @@ func (ing *Ingester) ingestFile(ctx context.Context, diskPath, identity string) 
 
 	embeddings, err := ing.Provider.Embed(ctx, texts)
 	if err != nil {
-		return 0, fmt.Errorf("embed %d chunks: %w", len(texts), err)
+		return 0, "", fmt.Errorf("embed %d chunks: %w", len(texts), err)
 	}
 	if len(embeddings) != len(chunks) {
-		return 0, fmt.Errorf("embedding provider returned %d vectors for %d chunks", len(embeddings), len(chunks))
+		return 0, "", fmt.Errorf("embedding provider returned %d vectors for %d chunks", len(embeddings), len(chunks))
 	}
 
 	docID, err := ing.Store.UpsertDocument(ctx, identity, contentHash)
 	if err != nil {
-		return 0, fmt.Errorf("upsert document: %w", err)
+		return 0, "", fmt.Errorf("upsert document: %w", err)
 	}
 
 	storeChunks := make([]store.Chunk, len(chunks))
@@ -119,8 +157,8 @@ func (ing *Ingester) ingestFile(ctx context.Context, diskPath, identity string) 
 		storeChunks[i] = store.Chunk{Index: c.Index, Content: c.Text, Embedding: embeddings[i]}
 	}
 	if err := ing.Store.ReplaceChunks(ctx, docID, storeChunks); err != nil {
-		return 0, fmt.Errorf("replace chunks: %w", err)
+		return 0, "", fmt.Errorf("replace chunks: %w", err)
 	}
 
-	return len(chunks), nil
+	return len(chunks), string(content), nil
 }
