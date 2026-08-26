@@ -64,6 +64,10 @@ func run(dir string) error {
 		return fmt.Errorf("ingest %q: %w", dir, err)
 	}
 
+	if result.Skipped {
+		fmt.Printf("Skipped: %q is unchanged since the last successful ingestion.\n", dir)
+		return nil
+	}
 	fmt.Printf("Documents: %d, Chunks: %d\n", result.Documents, result.Chunks)
 	return nil
 }

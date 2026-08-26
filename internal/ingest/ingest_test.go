@@ -35,6 +35,7 @@ type fakeStore struct {
 	documents     map[string]int64 // path -> id
 	chunksByDoc   map[int64][]store.Chunk
 	corpusSummary string
+	dirHash       string
 }
 
 func newFakeStore() *fakeStore {
@@ -46,6 +47,15 @@ func newFakeStore() *fakeStore {
 
 func (f *fakeStore) UpsertCorpusSummary(ctx context.Context, summary string) error {
 	f.corpusSummary = summary
+	return nil
+}
+
+func (f *fakeStore) GetIngestDirHash(ctx context.Context) (string, error) {
+	return f.dirHash, nil
+}
+
+func (f *fakeStore) SetIngestDirHash(ctx context.Context, hash string) error {
+	f.dirHash = hash
 	return nil
 }
 
@@ -115,13 +125,81 @@ func TestIngestDir_ReingestSamePathReusesDocumentID(t *testing.T) {
 	firstID, ok := st.documents["doc.md"]
 	require.True(t, ok, "doc.md was never upserted on first run")
 
-	_, err = ing.IngestDir(context.Background(), dir)
+	// Change the file's content (not just re-run unchanged) so the
+	// dir-hash skip (see TestIngestDir_SkipsWhenDirUnchanged below)
+	// doesn't short-circuit this run before it can exercise ON CONFLICT.
+	writeFile(t, dir, "doc.md", "hello world, again")
+
+	result, err := ing.IngestDir(context.Background(), dir)
 	require.NoError(t, err)
+	require.False(t, result.Skipped)
 	secondID, ok := st.documents["doc.md"]
 	require.True(t, ok, "doc.md was never upserted on second run")
 
 	assert.Equal(t, firstID, secondID, "document id should stay stable across re-ingestion (matches ON CONFLICT ... RETURNING id)")
 	assert.Len(t, st.documents, 1)
+}
+
+func TestIngestDir_SkipsWhenDirUnchanged(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "a.md", "hello world")
+
+	provider := &fakeProvider{}
+	st := newFakeStore()
+	ing := &Ingester{Store: st, Provider: provider, ChunkSize: 100, ChunkOverlap: 0}
+
+	result, err := ing.IngestDir(context.Background(), dir)
+	require.NoError(t, err)
+	require.False(t, result.Skipped)
+	require.Len(t, provider.calls, 1, "first run should embed")
+
+	result, err = ing.IngestDir(context.Background(), dir)
+	require.NoError(t, err)
+	assert.True(t, result.Skipped, "second run against unchanged content should be skipped")
+	assert.Len(t, provider.calls, 1, "no new Embed calls on a skipped run")
+}
+
+func TestIngestDir_ReingestsWhenFileAddedRemovedOrModified(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(t *testing.T, dir string)
+	}{
+		{
+			name: "file added",
+			mutate: func(t *testing.T, dir string) {
+				writeFile(t, dir, "b.md", "a new document")
+			},
+		},
+		{
+			name: "file modified",
+			mutate: func(t *testing.T, dir string) {
+				writeFile(t, dir, "a.md", "hello world, modified")
+			},
+		},
+		{
+			name: "file removed",
+			mutate: func(t *testing.T, dir string) {
+				require.NoError(t, os.Remove(filepath.Join(dir, "a.md")))
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			writeFile(t, dir, "a.md", "hello world")
+
+			ing := &Ingester{Store: newFakeStore(), Provider: &fakeProvider{}, ChunkSize: 100, ChunkOverlap: 0}
+			_, err := ing.IngestDir(context.Background(), dir)
+			require.NoError(t, err)
+
+			tt.mutate(t, dir)
+
+			result, err := ing.IngestDir(context.Background(), dir)
+			require.NoError(t, err)
+			assert.False(t, result.Skipped)
+		})
+	}
 }
 
 func TestIngestDir_SkipsSubdirectories(t *testing.T) {
