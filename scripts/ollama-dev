@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Installs Ollama and the embedding model this project's Provider talks to
-# (see internal/embedding/ollama.go), then makes sure it's running.
-# Idempotent — safe to re-run any time, e.g. after a fresh machine setup or
-# to confirm the local embedding server is still healthy.
+# Installs Ollama and the embedding + chat models this project talks to
+# (see internal/embedding/ollama.go and internal/chat/ollama.go), then
+# makes sure it's running. Idempotent — safe to re-run any time, e.g.
+# after a fresh machine setup or to confirm the local server is still
+# healthy.
 #
 # Two run modes:
 #   scripts/ollama-dev          Foreground mode (default): stops the
@@ -38,6 +39,7 @@ set -euo pipefail
 
 OLLAMA_URL="${OLLAMA_URL:-http://localhost:11434}"
 OLLAMA_EMBED_MODEL="${OLLAMA_EMBED_MODEL:-nomic-embed-text}"
+OLLAMA_CHAT_MODEL="${OLLAMA_CHAT_MODEL:-qwen3:8b}"
 
 DAEMON=false
 STOP=false
@@ -63,28 +65,42 @@ wait_until_reachable() {
 
 # Talks to whichever Ollama server is currently reachable at OLLAMA_URL —
 # callers are responsible for making sure that's the right one (daemon vs.
-# foreground mode have independent model stores; see header).
+# foreground mode have independent model stores; see header). Takes the
+# model name as $1 so it can pull both the embedding and chat models.
 ensure_model_pulled() {
+  model="$1"
   echo
-  echo "== Ensuring $OLLAMA_EMBED_MODEL is pulled =="
+  echo "== Ensuring $model is pulled =="
   # Escape BRE metacharacters in the model name before it goes into a grep
   # pattern — Ollama model names commonly contain '.' (e.g. "llama3.1"),
   # which would otherwise match any character and could false-positive
   # against a different pulled model.
-  escaped_model=$(printf '%s' "$OLLAMA_EMBED_MODEL" | sed 's/[.[\*^$]/\\&/g')
+  escaped_model=$(printf '%s' "$model" | sed 's/[.[\*^$]/\\&/g')
   if curl -fsS "$OLLAMA_URL/api/tags" | grep -q "\"name\":\"${escaped_model}\(:[^\"]*\)\?\""; then
-    echo "$OLLAMA_EMBED_MODEL already pulled."
+    echo "$model already pulled."
   else
-    ollama pull "$OLLAMA_EMBED_MODEL"
+    ollama pull "$model"
   fi
 }
 
-smoke_test() {
+embed_smoke_test() {
   echo
   echo "== Smoke test: POST $OLLAMA_URL/api/embed =="
   curl -fsS -X POST "$OLLAMA_URL/api/embed" \
     -H "Content-Type: application/json" \
     -d "{\"model\":\"$OLLAMA_EMBED_MODEL\",\"input\":\"Hello, RAG lab!\"}"
+  echo
+}
+
+# Minimal, non-streaming /api/chat call — just proves the chat model
+# loads and responds. Doesn't exercise tool-calling; that's covered by
+# internal/chat's own tests and a manual curl against cmd/serve's /chat.
+chat_smoke_test() {
+  echo
+  echo "== Smoke test: POST $OLLAMA_URL/api/chat =="
+  curl -fsS -X POST "$OLLAMA_URL/api/chat" \
+    -H "Content-Type: application/json" \
+    -d "{\"model\":\"$OLLAMA_CHAT_MODEL\",\"messages\":[{\"role\":\"user\",\"content\":\"Say hello in one word.\"}],\"stream\":false}"
   echo
 }
 
@@ -116,8 +132,10 @@ if $DAEMON; then
     wait_until_reachable
   fi
 
-  ensure_model_pulled
-  smoke_test
+  ensure_model_pulled "$OLLAMA_EMBED_MODEL"
+  embed_smoke_test
+  ensure_model_pulled "$OLLAMA_CHAT_MODEL"
+  chat_smoke_test
 
   if command_exists nvidia-smi; then
     echo
@@ -126,7 +144,7 @@ if $DAEMON; then
   fi
 
   echo
-  echo "Ollama setup OK — $OLLAMA_EMBED_MODEL is pulled and serving at $OLLAMA_URL."
+  echo "Ollama setup OK — $OLLAMA_EMBED_MODEL and $OLLAMA_CHAT_MODEL are pulled and serving at $OLLAMA_URL."
   echo "Run with no flags (or --foreground) any time to take over the terminal and watch live Ollama logs (Ctrl-C to stop)."
 else
   echo
@@ -148,8 +166,10 @@ else
   trap 'kill "$pid" 2>/dev/null' INT TERM
 
   wait_until_reachable
-  ensure_model_pulled
-  smoke_test
+  ensure_model_pulled "$OLLAMA_EMBED_MODEL"
+  embed_smoke_test
+  ensure_model_pulled "$OLLAMA_CHAT_MODEL"
+  chat_smoke_test
   echo
 
   wait "$pid"

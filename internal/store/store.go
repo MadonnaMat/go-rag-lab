@@ -83,7 +83,7 @@ func (s *Store) ReplaceChunks(ctx context.Context, documentID int64, chunks []Ch
 	if err != nil {
 		return fmt.Errorf("begin transaction: %w", err)
 	}
-	defer tx.Rollback(ctx) // no-op once committed below
+	defer func() { _ = tx.Rollback(ctx) }() // no-op once committed below
 
 	// DELETE is queued as the batch's first statement, alongside the
 	// inserts, so it pipelines in the same round trip instead of waiting
@@ -159,6 +159,65 @@ func (s *Store) SearchChunks(ctx context.Context, queryEmbedding []float32, topK
 		return nil, fmt.Errorf("iterate search results: %w", err)
 	}
 	return results, nil
+}
+
+// UpsertCorpusSummary replaces the corpus_summary singleton row — called
+// once per ingestion run (see internal/ingest), not per chat request.
+func (s *Store) UpsertCorpusSummary(ctx context.Context, summary string) error {
+	const q = `
+		INSERT INTO corpus_summary (id, summary, updated_at)
+		VALUES (1, $1, now())
+		ON CONFLICT (id) DO UPDATE SET summary = EXCLUDED.summary, updated_at = EXCLUDED.updated_at`
+
+	if _, err := s.pool.Exec(ctx, q, summary); err != nil {
+		return fmt.Errorf("upsert corpus summary: %w", err)
+	}
+	return nil
+}
+
+// GetCorpusSummary returns the corpus summary, or "" if ingestion hasn't
+// produced one yet (no error in that case — chat works fine without it).
+func (s *Store) GetCorpusSummary(ctx context.Context) (string, error) {
+	var summary string
+	err := s.pool.QueryRow(ctx, `SELECT summary FROM corpus_summary WHERE id = 1`).Scan(&summary)
+	if err == pgx.ErrNoRows {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("get corpus summary: %w", err)
+	}
+	return summary, nil
+}
+
+// GetIngestDirHash returns the directory-level content hash stored by the
+// last successful ingestion run, or "" if there's never been one (a fresh
+// database, or one that predates this check) — no error in that case, so
+// callers can treat it as "always ingest."
+func (s *Store) GetIngestDirHash(ctx context.Context) (string, error) {
+	var hash string
+	err := s.pool.QueryRow(ctx, `SELECT dir_hash FROM ingest_state WHERE id = 1`).Scan(&hash)
+	if err == pgx.ErrNoRows {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("get ingest dir hash: %w", err)
+	}
+	return hash, nil
+}
+
+// SetIngestDirHash replaces the ingest_state singleton row — called once
+// per successful ingestion run (see internal/ingest), after all
+// documents/chunks/summary are written, not before.
+func (s *Store) SetIngestDirHash(ctx context.Context, hash string) error {
+	const q = `
+		INSERT INTO ingest_state (id, dir_hash, updated_at)
+		VALUES (1, $1, now())
+		ON CONFLICT (id) DO UPDATE SET dir_hash = EXCLUDED.dir_hash, updated_at = EXCLUDED.updated_at`
+
+	if _, err := s.pool.Exec(ctx, q, hash); err != nil {
+		return fmt.Errorf("set ingest dir hash: %w", err)
+	}
+	return nil
 }
 
 // CountChunks returns the total number of chunk rows, for tests and

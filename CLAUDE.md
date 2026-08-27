@@ -3,16 +3,24 @@
 Week 3 of a self-directed job-hunt technical lab (AI Engineering & RAG
 Architecture, built in Go). See `~/.claude/skills/job-hunt-today/progress-log.md`
 for the full week's schedule — this repo has ingestion (`internal/ingest` /
-`cmd/ingest`) and a query/retrieval REST endpoint (`internal/retrieve` /
-`internal/api` / `cmd/serve`) so far; a chat endpoint and a client are later
-days and don't exist yet, don't assume they do.
+`cmd/ingest`), a query/retrieval REST endpoint (`internal/retrieve` /
+`internal/api` / `cmd/serve`), and a tool-calling RAG chat endpoint
+(`internal/chat` / `internal/api`'s `POST /chat`, streamed over SSE) with a
+small HTMX + Alpine.js + Tailwind frontend (`web/`, embedded into
+`cmd/serve`'s binary) so far; a standalone client is a later day and
+doesn't exist yet, don't assume it does.
 
 ## Commands
 
-- `make build` / `make vet` / `make fmt` / `make lint` (= fmt-check + vet)
+- `make build` / `make vet` / `make fmt` / `make lint` — `lint` runs
+  `golangci-lint` (see "Linting" below), which subsumes `fmt-check` + `vet`
 - `make test-unit` — pure logic + httptest-mocked Ollama, no infra needed
 - `make test` — also runs DB integration tests, against `rag_test` (not
   dev's `rag` database — see below). Requires `make up` running.
+- `make test-web` — headless-Chrome tests for the chat frontend
+  (`internal/api/web_test.go`, via `chromedp`); needs Chrome/Chromium
+  installed locally (`ubuntu-latest` ships it for CI). Self-skips via
+  `t.Skip()` if no Chrome/Chromium binary is on `PATH`.
 - `make up` / `make down` — docker-compose's `db` service
 - `make migrate` / `make migrate-down` — apply/roll back
   `internal/store/migrations/*.sql` natively (see "Database migrations"
@@ -34,7 +42,7 @@ days and don't exist yet, don't assume they do.
   also a prerequisite of `build`/`vet`/`test-unit`/`test`. With `cmd/serve`
   running, live Swagger UI is at `http://<addr>/swagger/index.html`.
 - `scripts/ollama-dev --daemon` — installs Ollama if needed, ensures the
-  systemd service is running, pulls the embedding model
+  systemd service is running, pulls the embedding and chat models
 - `make dev-up` (`scripts/dev-up`) — one-command local verification loop:
   starts Ollama + `db` (only if not already running), migrates, ingests
   `sample_docs/`, then runs `cmd/serve` in the foreground so you can go
@@ -68,19 +76,52 @@ else changes.
 The query side mirrors this exactly: `internal/embedding` + `internal/store`
 → `internal/retrieve` (embeds a query with the same `Provider` used at
 ingestion, then asks the store for the nearest chunks) → `internal/api` (a
-thin `chi` HTTP layer: `GET /query`, `GET /healthz`, `GET /swagger/*`) →
-`cmd/serve/main.go` (thin: flags + wiring only). `/query` is `GET` with
-`query`/`top_k` as URL query params, not `POST` with a JSON body — a search
-here is a safe, idempotent read (no state changes, no side effects), which
-is exactly what `GET` semantics are for; it also means it's directly
-testable by pasting a URL into a browser. Don't reflexively default a new
-JSON-shaped endpoint to `POST` — check whether it's actually a read first.
-`ingest.Store` and
-`retrieve.Store` are each a small interface (not `*store.Store` directly)
-so tests substitute a fake with no real Postgres involved — Go interfaces
-are satisfied structurally, so `*store.Store` never had to declare it
-implements anything. Same reasoning for `api.Retriever` not depending on
-`*retrieve.Retriever` directly.
+thin `chi` HTTP layer) → `cmd/serve/main.go` (thin: flags + wiring only).
+`/query` is `GET` with `query`/`top_k` as URL query params, not `POST` with
+a JSON body — a search here is a safe, idempotent read (no state changes,
+no side effects), which is exactly what `GET` semantics are for; it also
+means it's directly testable by pasting a URL into a browser. Don't
+reflexively default a new JSON-shaped endpoint to `POST` — check whether
+it's actually a read first. `ingest.Store` and `retrieve.Store` are each a
+small interface (not `*store.Store` directly) so tests substitute a fake
+with no real Postgres involved — Go interfaces are satisfied structurally,
+so `*store.Store` never had to declare it implements anything. Same
+reasoning for `api.Retriever` not depending on `*retrieve.Retriever`
+directly.
+
+Chat is a third orchestration layer, structurally parallel to
+`internal/retrieve`: `internal/chat` owns a hand-rolled streaming Ollama
+`/api/chat` client (same conventions as `internal/embedding/ollama.go` — no
+client library), the `retrieve_documents` tool (dispatched by name in
+`tools.go`, so a second tool is one new `tool_*.go` file plus one `switch`
+case), auto-compaction of long conversations, and a post-answer
+self-verification pass — and knows nothing about HTTP. `internal/api`'s
+`POST /chat` is a thin SSE-emitting layer on top (`sse.go` maps each
+`chat.Event` to a named SSE frame: `tool_call`, `tool_result`, `thinking`,
+`token`, `compacting`, `compacted`, `verifying`, `revised`,
+`context_usage`, `done`, `error`), the same relationship `internal/api` has
+with `internal/retrieve`. Chat is stateless — the client resends the full
+conversation history every request, no server-side session state — and a
+client-sent `role:"system"` message is rejected with 400 so the server's
+own system prompt (`internal/chat/prompts/system.md`, an embedded Markdown
+file, not a Go string literal — see the other files in that package) stays
+authoritative. A `/compact` message (typed by the user, or sent by the
+frontend's context-usage indicator when clicked) skips the model entirely
+and force-compacts the conversation.
+
+`web/` is the chat frontend — plain HTMX + Alpine.js + a prebuilt Tailwind
+stylesheet, no Node/build step — kept *inside* this Go module (not a
+separate `server/`-style split) specifically so `go:embed` can compile it
+into `cmd/serve`'s binary (`web/embed.go`), the same self-contained-binary
+property `ingest`/`serve`/`migrate` already have. `chat.js` hand-rolls the
+SSE parsing via `fetch` + `ReadableStream` rather than htmx's SSE
+extension or native `EventSource`, because `/chat` is `POST` with a JSON
+body and both of those only support `GET`. If you touch `chat.js`'s
+Alpine state, watch for the reactivity gotcha it already hit once: mutate
+array elements through `this.messages[idx]`, never through a plain-object
+reference held from before a `push()` — Alpine/Vue-style reactivity wraps
+pushed objects in a proxy, so a held raw reference won't trigger re-renders
+(`internal/api/web_test.go`'s chromedp tests caught this for real).
 
 `internal/store`'s schema lives in versioned migrations
 (`internal/store/migrations/`), not a single embedded file — see "Database
@@ -129,6 +170,21 @@ are exported specifically so `swag`'s reflection-based schema generation
 can introspect them — don't make them unexported again without checking
 `make swagger` still works.
 
+## Linting
+
+`make lint` runs `golangci-lint` (`.golangci.yml`), tracked as a `go.mod`
+`tool` dependency exactly like `swag` — `go tool golangci-lint`, no
+separate global install, resolved the same way any other module
+dependency is. It subsumes `gofmt`/`goimports` formatting checks and `go
+vet`, plus complexity linters (`gocyclo`, `funlen`, `gocognit`) on top of
+its standard set — `make fmt`/`make fmt-check` now delegate to
+`golangci-lint fmt`/`fmt --diff` too. `scripts/golangci-lint` is a thin
+wrapper around `go tool golangci-lint` (always `cd`s to the repo root
+first) so the Makefile and VS Code's Go extension (`.vscode/settings.json`
+points `go.lintTool`/`go.alternateTools` at it) invoke the exact same
+pinned binary instead of two independently-installed copies that could
+drift apart.
+
 ## Conventions
 
 - Prefer common industry tools or stdlib over inventing bespoke
@@ -136,14 +192,18 @@ can introspect them — don't make them unexported again without checking
   `golang-migrate` for schema migrations, `swaggo/swag` for API docs. Still
   no CLI framework, no `godotenv`. Table-driven tests (`t.Run` subtests) are
   the default test shape.
-- Three tiers of test, from fastest/least-real to slowest/most-real: unit
+- Four tiers of test, from fastest/least-real to slowest/most-real: unit
   (fakes everywhere, `make test-unit`, no infra) → DB integration
   (`internal/store`'s and `internal/api`'s `DATABASE_URL`-gated tests: real
-  Postgres, fake embedding `Provider`, `make test`) → full real-stack smoke
-  test (`scripts/ci-verify`: real Postgres *and* real Ollama, containerized).
-  A change to `SearchChunks`/`Retriever`/the HTTP layer should usually get a
-  test at the DB-integration tier; only the "does this work against a real
-  embedding model" question belongs in `ci-verify`.
+  Postgres, fake embedding `Provider`/scripted fake Ollama chat server,
+  `make test`) → browser (`internal/api/web_test.go`'s Chrome/Chromium-gated
+  chromedp tests against a scripted fake `Chatter`, `make test-web`) → full
+  real-stack smoke test (`scripts/ci-verify`: real Postgres *and* real
+  Ollama, containerized). A change to `SearchChunks`/`Retriever`/`Chatter`/the
+  HTTP layer should usually get a test at the DB-integration tier; a change
+  to `web/`'s templates/JS should usually get one at the browser tier; only
+  the "does this work against a real embedding/chat model" question belongs
+  in `ci-verify`.
 - DB-dependent tests read `DATABASE_URL` and `t.Skip()` if it's unset —
   `go test ./...` always works with zero infra running.
 - Document identity in the store is the **filename alone**, not the full
@@ -159,8 +219,13 @@ can introspect them — don't make them unexported again without checking
 ## The CI-only Ollama image (`docker/ollama-ci/`)
 
 `ghcr.io/madonnamat/go-rag-lab-ollama-ci` is a custom image with
-`nomic-embed-text` pre-baked in at build time (not pulled at container
-start), so CI never waits on a model download. It's public, linked to this
+`nomic-embed-text` and `qwen3:0.6b` pre-baked in at build time (not pulled
+at container start), so CI never waits on a model download. `qwen3:0.6b`
+is deliberately *not* the production chat model (`qwen3:8b`, ~5.2GB,
+`OLLAMA_CHAT_MODEL`'s default) — `ci-verify`'s `/chat` smoke step only
+needs to prove the tool-calling wiring works end-to-end, not exercise a
+production-quality model, so a much smaller tool-calling-capable model
+keeps this image's size/build time down. It's public, linked to this
 repo, and used only by `make ci-verify` / `docker-compose.yml`'s `ollama`
 service — local dev keeps using host-installed Ollama for GPU access (see
 below), this image is CPU-only and CI-only.
@@ -173,8 +238,8 @@ dropping the GPU directories entirely (320MB vs. 3.4GB unfiltered — see
 the Dockerfile's comments for exactly which files and why this works
 without rebuilding Ollama from source).
 
-Rebuild and push it if the embedding model or Ollama version ever needs
-bumping:
+Rebuild and push it if the embedding model, CI chat model, or Ollama
+version ever needs bumping:
 
 ```sh
 docker build -t ghcr.io/madonnamat/go-rag-lab-ollama-ci:latest docker/ollama-ci

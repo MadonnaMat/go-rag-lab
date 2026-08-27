@@ -63,7 +63,7 @@ func (o *Ollama) Embed(ctx context.Context, texts []string) ([][]float32, error)
 	if err != nil {
 		return nil, fmt.Errorf("ollama embed request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)

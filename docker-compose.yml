@@ -53,6 +53,9 @@ services:
       # above, reached by its compose network name.
       OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
       OLLAMA_EMBED_MODEL: ${OLLAMA_EMBED_MODEL:-nomic-embed-text}
+      # Used for corpus-summary generation (internal/chat.OllamaChat.Summarize),
+      # not just /chat's serve-side use — ingest runs a chat call too.
+      OLLAMA_CHAT_MODEL: ${OLLAMA_CHAT_MODEL:-qwen3:8b}
     volumes:
       - ./sample_docs:/app/sample_docs:ro
 
@@ -84,6 +87,7 @@ services:
       EMBEDDING_PROVIDER: ollama
       OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
       OLLAMA_EMBED_MODEL: ${OLLAMA_EMBED_MODEL:-nomic-embed-text}
+      OLLAMA_CHAT_MODEL: ${OLLAMA_CHAT_MODEL:-qwen3:8b}
       SERVER_ADDR: ${SERVER_ADDR:-:8080}
     ports:
       - "${SERVER_PORT:-8080}:8080"

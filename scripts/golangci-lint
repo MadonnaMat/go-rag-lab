@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Thin wrapper around `go tool golangci-lint` (the go.mod-tracked version,
+# same pattern as swag — see CLAUDE.md's "API docs" section) so both the
+# Makefile and VS Code's Go extension invoke the exact same pinned binary
+# instead of a separately `go install`ed one that could drift out of sync.
+# Always runs from the repo root regardless of the caller's cwd, since the
+# Go extension may invoke this from a subdirectory.
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
+exec go tool golangci-lint "$@"

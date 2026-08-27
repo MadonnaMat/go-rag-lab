@@ -1,10 +1,15 @@
-# A pre-baked, CPU-only Ollama image for CI: nomic-embed-text is pulled at
-# *build* time, not container-start time, so CI never waits on a model
-# download — ghcr.io/madonnamat/go-rag-lab-ollama-ci ships with the weights
-# already in a layer. Uses the real production model (not a smaller
+# A pre-baked, CPU-only Ollama image for CI: nomic-embed-text and
+# qwen3:0.6b are pulled at *build* time, not container-start time, so CI
+# never waits on a model download — ghcr.io/madonnamat/
+# go-rag-lab-ollama-ci ships with the weights already in a layer.
+# nomic-embed-text is the real production embedding model (not a smaller
 # substitute) since our schema hardcodes vector(768) to match its output
 # size — a different model would need a different dimension and simply
-# wouldn't fit the column.
+# wouldn't fit the column. qwen3:0.6b, by contrast, is deliberately NOT
+# the production chat model (qwen3:8b, ~5.2GB) — CI only needs to prove
+# tool-calling wiring works end-to-end (scripts/ci-verify's /chat smoke
+# step), not exercise a production-quality model, so a much smaller
+# tool-calling-capable model keeps this image's size/build time down.
 #
 # The official ollama/ollama image bundles CUDA, ROCm, and Vulkan GPU
 # backends (~4GB combined) that GitHub Actions' GPU-less runners can never
@@ -69,4 +74,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl && \
       -H "Content-Type: application/json" \
       -d '{"model":"nomic-embed-text","input":"build-time smoke test"}' \
       | grep -q '"embeddings"' && \
+    ollama pull qwen3:0.6b && \
+    curl -fsS -X POST http://localhost:11434/api/chat \
+      -H "Content-Type: application/json" \
+      -d '{"model":"qwen3:0.6b","stream":false,"messages":[{"role":"user","content":"say hi"}]}' \
+      | grep -q '"message"' && \
     apt-get purge -y curl && apt-get autoremove -y && apt-get clean && rm -rf /var/lib/apt/lists/*

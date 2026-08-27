@@ -24,7 +24,10 @@ jobs:
         run: go mod download
       - name: Build
         run: make build
-      - name: Lint (gofmt + go vet)
+      # golangci-lint (tracked as a go.mod tool dependency — see
+      # .golangci.yml) subsumes gofmt/goimports formatting checks and go
+      # vet, plus complexity linters, in one command.
+      - name: Lint (golangci-lint)
         run: make lint
       # db comes from our own docker-compose.yml (not a separate GH Actions
       # `services:` block) — one definition of the Postgres+pgvector setup,
@@ -33,6 +36,11 @@ jobs:
         run: make up
       - name: Test
         run: make test
+      # ubuntu-latest ships Google Chrome preinstalled, so this can run
+      # here without any extra setup — headless-browser tests for the
+      # HTMX/Alpine.js frontend (internal/api/web_test.go, via chromedp).
+      - name: Browser tests (chromedp)
+        run: make test-web
       # Brings up the pre-baked CI-only Ollama alongside db, then builds
       # and runs the app service against them for real — a stronger check
       # than a bare `docker build`, since it proves the image both builds

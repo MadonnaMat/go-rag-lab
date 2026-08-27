@@ -16,6 +16,8 @@ import (
 	"net/http"
 
 	"github.com/MadonnaMat/go-rag-lab/internal/api"
+	"github.com/MadonnaMat/go-rag-lab/internal/chat"
+	"github.com/MadonnaMat/go-rag-lab/internal/chat/prompts"
 	"github.com/MadonnaMat/go-rag-lab/internal/config"
 	"github.com/MadonnaMat/go-rag-lab/internal/embedding"
 	"github.com/MadonnaMat/go-rag-lab/internal/retrieve"
@@ -62,7 +64,23 @@ func run(addrFlag string) error {
 	defer s.Close()
 
 	retriever := &retrieve.Retriever{Store: s, Provider: provider}
-	handler := api.NewRouter(&api.Handler{Retriever: retriever, DefaultTopK: cfg.TopK})
+
+	chatClient := chat.NewOllamaChat(cfg.OllamaURL, cfg.OllamaChatModel)
+	contextTokens, err := chatClient.ContextLength(ctx)
+	if err != nil {
+		log.Printf("warning: could not determine %s's context length, falling back to a default: %v", cfg.OllamaChatModel, err)
+	}
+	chatter := &chat.Chatter{
+		Client:            chatClient,
+		Retriever:         retriever,
+		DefaultTopK:       cfg.TopK,
+		SystemPrompt:      prompts.System,
+		MaxToolIterations: 4,
+		ContextTokens:     contextTokens,
+		Summaries:         s,
+	}
+
+	handler := api.NewRouter(&api.Handler{Retriever: retriever, Chatter: chatter, DefaultTopK: cfg.TopK})
 
 	log.Printf("listening on %s", addr)
 	return http.ListenAndServe(addr, handler)

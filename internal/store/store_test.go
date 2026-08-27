@@ -140,3 +140,22 @@ func TestSearchChunks_OrdersByDistanceAndLimitsToTopK(t *testing.T) {
 	assert.Equal(t, "partial match", results[1].Content)
 	assert.Greater(t, results[1].Distance, results[0].Distance, "a partial match should be farther than an exact one")
 }
+
+func TestIngestDirHash_RoundTrip(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+	t.Cleanup(func() {
+		_, err := s.pool.Exec(context.Background(), `DELETE FROM ingest_state WHERE id = 1`)
+		assert.NoError(t, err)
+	})
+
+	require.NoError(t, s.SetIngestDirHash(ctx, "hash-1"))
+	got, err := s.GetIngestDirHash(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, "hash-1", got)
+
+	require.NoError(t, s.SetIngestDirHash(ctx, "hash-2"))
+	got, err = s.GetIngestDirHash(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, "hash-2", got, "SetIngestDirHash should upsert the singleton row, not insert a second one")
+}
