@@ -115,7 +115,7 @@ func TestRun_NoToolCall(t *testing.T) {
 
 func TestRun_SingleToolCall(t *testing.T) {
 	srv := newScriptedServer(
-		toolCallLines(retrieveToolName, map[string]any{"query": "ulmarin tech"}),
+		toolCallLines("retrieve_documents", map[string]any{"query": "ulmarin tech"}),
 		okLines("The answer is X"),
 		okLines("OK"),
 	)
@@ -148,7 +148,7 @@ func TestRun_SingleToolCall(t *testing.T) {
 
 func TestRun_RetrieverError(t *testing.T) {
 	srv := newScriptedServer(
-		toolCallLines(retrieveToolName, map[string]any{"query": "x"}),
+		toolCallLines("retrieve_documents", map[string]any{"query": "x"}),
 		okLines("fallback answer"),
 		okLines("OK"),
 	)
@@ -185,7 +185,7 @@ func TestRun_UnknownTool(t *testing.T) {
 }
 
 func TestRun_MaxIterationsExceeded(t *testing.T) {
-	srv := newScriptedServer(toolCallLines(retrieveToolName, map[string]any{"query": "x"}))
+	srv := newScriptedServer(toolCallLines("retrieve_documents", map[string]any{"query": "x"}))
 	defer srv.Close()
 
 	c := &Chatter{

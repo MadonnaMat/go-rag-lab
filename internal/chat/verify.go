@@ -12,20 +12,6 @@ import (
 // MaxToolIterations does for the main loop.
 const verifyMaxIterations = 3
 
-// verifyTools is availableTools minus lore_drop: the self-check pass may
-// read the corpus (retrieve_documents / list_resources / get_resource) to
-// fact-check its own draft, but must never write to it.
-func (c *Chatter) verifyTools() []toolDef {
-	all := c.availableTools()
-	out := make([]toolDef, 0, len(all))
-	for _, t := range all {
-		if t.Function.Name != loreDropToolName {
-			out = append(out, t)
-		}
-	}
-	return out
-}
-
 // verify emits EventVerifying, then runs a short bounded tool-call loop
 // asking the model to check its own draft — it may call the read-only
 // corpus tools to do so (emitting the usual EventToolCall/EventToolResult
@@ -43,6 +29,7 @@ func (c *Chatter) verify(ctx context.Context, messages []chatMessage, draftConte
 		Role:    "user",
 		Content: fmt.Sprintf(prompts.Verify, draftContent),
 	})
+	succeeded := map[string]bool{}
 
 	for iteration := 0; iteration < verifyMaxIterations; iteration++ {
 		draft, sawToolCall, err := c.verifyTurn(ctx, msgs)
@@ -55,7 +42,7 @@ func (c *Chatter) verify(ctx context.Context, messages []chatMessage, draftConte
 		}
 
 		msgs = append(msgs, draft)
-		toolMessages, err := c.executeToolCalls(ctx, msgs, draft.ToolCalls, emit)
+		toolMessages, err := c.executeToolCalls(ctx, draft.ToolCalls, succeeded, emit)
 		if err != nil {
 			return "", err
 		}
@@ -71,7 +58,7 @@ func (c *Chatter) verify(ctx context.Context, messages []chatMessage, draftConte
 func (c *Chatter) verifyTurn(ctx context.Context, msgs []chatMessage) (chatMessage, bool, error) {
 	var draft chatMessage
 	var sawToolCall bool
-	err := c.Client.Chat(ctx, msgs, c.verifyTools(), func(line chatStreamLine) error {
+	err := c.Client.Chat(ctx, msgs, c.toolDefs(true), func(line chatStreamLine) error {
 		if len(line.Message.ToolCalls) > 0 {
 			sawToolCall = true
 			draft.ToolCalls = append(draft.ToolCalls, line.Message.ToolCalls...)

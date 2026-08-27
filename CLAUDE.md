@@ -92,18 +92,28 @@ directly.
 Chat is a third orchestration layer, structurally parallel to
 `internal/retrieve`: `internal/chat` owns a hand-rolled streaming Ollama
 `/api/chat` client (same conventions as `internal/embedding/ollama.go` — no
-client library), four tools — `retrieve_documents` (semantic chunk search),
-`list_resources` (enumerate ingested docs), `get_resource` (read one whole
-`.md` off disk from `LORE_DIR`), and `lore_drop` (write a new/updated
-ulmarin doc to `LORE_DIR` and re-ingest just that file via
-`ingest.Ingester.IngestFile`, which also clears the ingest dir-hash) — each
-one `tool_*.go` file plus a `switch` case in `tools.go`, dispatched by name;
-`c.availableTools()` only advertises a tool whose optional `Chatter`
-dependency (`Docs` / `Loremaster` / `LoreDir`) is wired. `cmd/serve` now
-builds an `ingest.Ingester` too (not just `cmd/ingest`). Then auto-compaction
-of long conversations, and a post-answer self-verification pass that may call
-the read-only tools (everything but `lore_drop`) to fact-check its own draft
-— and knows nothing about HTTP. `internal/api`'s
+client library) and four tools — `retrieve_documents` (semantic chunk
+search), `list_resources` (enumerate ingested docs), `get_resource` (read
+one whole `.md` off disk from `LORE_DIR`), and `lore_drop` (write a
+new/updated ulmarin doc to `LORE_DIR` and re-ingest just that file via
+`ingest.Ingester.IngestFile`, which also clears the ingest dir-hash).
+
+The tools live in their own package, `internal/chat/tools`: each is one
+file implementing a small `Tool` interface (`Name`/`Def`/`Available`/
+`Writes`/`OncePerTurn`/`Run`), registered in `tools.All()`. A tool is a
+pure `Run(ctx, Call, Deps) Result` — it knows nothing about `*Chatter`,
+Ollama, or SSE. `internal/chat/dispatch.go` is the seam: it builds a
+`tools.Deps` from the `Chatter`, advertises `tools.Available(deps)` (minus
+`Writes()` tools during the verify pass), runs the call, enforces the
+`OncePerTurn()` guard (one `lore_drop` per turn), and maps the `Result`
+back to conversation messages + `Event`s. Adding a tool is one new file in
+`internal/chat/tools` plus one line in `All()` — no `switch` to touch.
+`cmd/serve` now builds an `ingest.Ingester` too (not just `cmd/ingest`), to
+back `lore_drop`.
+
+Then auto-compaction of long conversations, and a post-answer
+self-verification pass that may call the read-only tools (everything but
+`lore_drop`) to fact-check its own draft — and knows nothing about HTTP. `internal/api`'s
 `POST /chat` is a thin SSE-emitting layer on top (`sse.go` maps each
 `chat.Event` to a named SSE frame: `tool_call`, `tool_result`, `thinking`,
 `token`, `compacting`, `compacted`, `verifying`, `revised`,

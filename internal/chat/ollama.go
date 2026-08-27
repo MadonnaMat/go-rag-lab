@@ -16,6 +16,7 @@ import (
 	"net/http"
 
 	"github.com/MadonnaMat/go-rag-lab/internal/chat/prompts"
+	"github.com/MadonnaMat/go-rag-lab/internal/chat/tools"
 )
 
 // defaultContextLength is used when Ollama's /api/show doesn't return a
@@ -65,21 +66,14 @@ type toolCall struct {
 	} `json:"function"`
 }
 
-type toolDef struct {
-	Type     string `json:"type"`
-	Function struct {
-		Name        string         `json:"name"`
-		Description string         `json:"description"`
-		Parameters  map[string]any `json:"parameters"`
-	} `json:"function"`
-}
-
 type chatRequest struct {
 	Model    string        `json:"model"`
 	Messages []chatMessage `json:"messages"`
-	Tools    []toolDef     `json:"tools,omitempty"`
-	Stream   bool          `json:"stream"`
-	Think    bool          `json:"think,omitempty"`
+	// Tools uses tools.Def directly — it already carries Ollama's exact
+	// /api/chat "tools" wire shape (see internal/chat/tools).
+	Tools  []tools.Def `json:"tools,omitempty"`
+	Stream bool        `json:"stream"`
+	Think  bool        `json:"think,omitempty"`
 }
 
 type chatStreamLine struct {
@@ -94,11 +88,11 @@ type chatStreamLine struct {
 // until Done:true or ctx is canceled. A line's Message.Thinking and
 // Message.Content are populated independently as the model alternates
 // between reasoning and answering.
-func (c *OllamaChat) Chat(ctx context.Context, messages []chatMessage, tools []toolDef, onLine func(chatStreamLine) error) error {
+func (c *OllamaChat) Chat(ctx context.Context, messages []chatMessage, toolDefs []tools.Def, onLine func(chatStreamLine) error) error {
 	reqBody, err := json.Marshal(chatRequest{
 		Model:    c.model,
 		Messages: messages,
-		Tools:    tools,
+		Tools:    toolDefs,
 		Stream:   true,
 		Think:    true,
 	})
