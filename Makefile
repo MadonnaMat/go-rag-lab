@@ -84,10 +84,10 @@ migrate-down:
 	go run ./cmd/migrate -down
 
 ingest:
-	go run ./cmd/ingest -dir=sample_docs
+	go run ./cmd/ingest -dir=lore_docs
 
 # Quick local-verification loop: starts Ollama + db (only if not already
-# running), migrates + ingests sample_docs, then runs cmd/serve in the
+# running), migrates + ingests lore_docs, then runs cmd/serve in the
 # foreground — go check the browser, Ctrl-C to stop everything this
 # started. See scripts/dev-up.
 dev-up:

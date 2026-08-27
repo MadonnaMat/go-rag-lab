@@ -161,6 +161,45 @@ func (s *Store) SearchChunks(ctx context.Context, queryEmbedding []float32, topK
 	return results, nil
 }
 
+// DocumentInfo describes one ingested document: its identity (bare
+// filename — see internal/ingest.ingestFile) and how many chunks it
+// produced.
+type DocumentInfo struct {
+	Path   string
+	Chunks int
+}
+
+// ListDocuments returns every ingested document with its chunk count,
+// ordered by path — a pure read over the existing tables (no schema of its
+// own). Used by the chat list_resources tool.
+func (s *Store) ListDocuments(ctx context.Context) ([]DocumentInfo, error) {
+	const q = `
+		SELECT d.path, count(c.id)
+		FROM documents d
+		LEFT JOIN chunks c ON c.document_id = d.id
+		GROUP BY d.path
+		ORDER BY d.path`
+
+	rows, err := s.pool.Query(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("list documents: %w", err)
+	}
+	defer rows.Close()
+
+	var docs []DocumentInfo
+	for rows.Next() {
+		var d DocumentInfo
+		if err := rows.Scan(&d.Path, &d.Chunks); err != nil {
+			return nil, fmt.Errorf("scan document info: %w", err)
+		}
+		docs = append(docs, d)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate documents: %w", err)
+	}
+	return docs, nil
+}
+
 // UpsertCorpusSummary replaces the corpus_summary singleton row — called
 // once per ingestion run (see internal/ingest), not per chat request.
 func (s *Store) UpsertCorpusSummary(ctx context.Context, summary string) error {

@@ -76,6 +76,22 @@ func (f *fakeStore) ReplaceChunks(ctx context.Context, documentID int64, chunks 
 	return nil
 }
 
+func (f *fakeStore) ListDocuments(context.Context) ([]store.DocumentInfo, error) {
+	out := make([]store.DocumentInfo, 0, len(f.documents))
+	for path, id := range f.documents {
+		out = append(out, store.DocumentInfo{Path: path, Chunks: len(f.chunksByDoc[id])})
+	}
+	return out, nil
+}
+
+func (f *fakeStore) DeleteDocument(_ context.Context, path string) error {
+	if id, ok := f.documents[path]; ok {
+		delete(f.chunksByDoc, id)
+		delete(f.documents, path)
+	}
+	return nil
+}
+
 func writeFile(t *testing.T, dir, name, content string) {
 	t.Helper()
 	require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644))
@@ -274,3 +290,55 @@ func (erroringProvider) Embed(ctx context.Context, texts []string) ([][]float32,
 }
 
 var errEmbedFailed = errors.New("embedding backend unavailable")
+
+func TestIngestFile(t *testing.T) {
+	provider := &fakeProvider{}
+	st := newFakeStore()
+	st.dirHash = "stale-hash" // a prior IngestDir run left this
+
+	ing := &Ingester{Store: st, Provider: provider, ChunkSize: 8, ChunkOverlap: 2}
+
+	n, err := ing.IngestFile(context.Background(), "test-fixture-doc.md", []byte("The ulmarin eat moss and lichen."))
+	require.NoError(t, err)
+	assert.Positive(t, n)
+
+	// Document upserted under its bare filename.
+	id, ok := st.documents["test-fixture-doc.md"]
+	require.True(t, ok)
+	assert.Len(t, st.chunksByDoc[id], n)
+
+	// Dir hash cleared so the next IngestDir does a full re-ingest.
+	assert.Empty(t, st.dirHash)
+
+	// Re-running with new content replaces chunks under the same id.
+	n2, err := ing.IngestFile(context.Background(), "test-fixture-doc.md", []byte("Revised."))
+	require.NoError(t, err)
+	assert.Equal(t, id, st.documents["test-fixture-doc.md"])
+	assert.Len(t, st.chunksByDoc[id], n2)
+}
+
+func TestIngestDir_DeletesOrphanedDocuments(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "keep.md", "kept content")
+	writeFile(t, dir, "gone.md", "doomed content")
+
+	st := newFakeStore()
+	ing := &Ingester{Store: st, Provider: &fakeProvider{}, ChunkSize: 100, ChunkOverlap: 0}
+
+	r, err := ing.IngestDir(context.Background(), dir)
+	require.NoError(t, err)
+	assert.Equal(t, 2, r.Documents)
+	assert.Equal(t, 0, r.Deleted)
+
+	// Remove one file and re-ingest.
+	require.NoError(t, os.Remove(filepath.Join(dir, "gone.md")))
+	r, err = ing.IngestDir(context.Background(), dir)
+	require.NoError(t, err)
+
+	assert.Equal(t, 1, r.Deleted)
+	_, stillThere := st.documents["gone.md"]
+	assert.False(t, stillThere, "orphaned document row should be deleted")
+	assert.Len(t, st.chunksByDoc, 1, "orphaned document's chunks should be gone too")
+	_, kept := st.documents["keep.md"]
+	assert.True(t, kept)
+}

@@ -3,7 +3,7 @@ set -euo pipefail
 
 # Local dev convenience: brings up everything needed to try the query API
 # in a browser (native Ollama + `db` in Docker, migrated and ingested with
-# sample_docs), then runs cmd/serve in the foreground so you can just go
+# lore_docs), then runs cmd/serve in the foreground so you can just go
 # check the browser and Ctrl-C when done. Only stops what it itself
 # started — anything already running before this script was invoked is
 # left alone.
@@ -60,8 +60,8 @@ echo "== Applying migrations =="
 go run ./cmd/migrate
 
 echo
-echo "== Ingesting sample_docs =="
-go run ./cmd/ingest -dir=sample_docs
+echo "== Ingesting lore_docs =="
+go run ./cmd/ingest -dir=lore_docs
 
 echo
 echo "== Regenerating Swagger docs =="

@@ -20,13 +20,18 @@ RUN CGO_ENABLED=0 go build -o /out/migrate ./cmd/migrate
 FROM gcr.io/distroless/static-debian12 AS ingest
 WORKDIR /app
 COPY --from=build /out/ingest /app/ingest
-COPY sample_docs /app/sample_docs
+COPY lore_docs /app/lore_docs
 ENTRYPOINT ["/app/ingest"]
-CMD ["-dir=/app/sample_docs"]
+CMD ["-dir=/app/lore_docs"]
 
 FROM gcr.io/distroless/static-debian12 AS serve
 WORKDIR /app
 COPY --from=build /out/serve /app/serve
+# Seed corpus for the chat get_resource / lore_drop tools (LORE_DIR defaults
+# to ./lore_docs, resolved against this WORKDIR). Same self-contained-image
+# property the ingest stage has; docker-compose bind-mounts over this so
+# lore_drop writes persist to the host.
+COPY lore_docs /app/lore_docs
 ENTRYPOINT ["/app/serve"]
 
 FROM gcr.io/distroless/static-debian12 AS migrate

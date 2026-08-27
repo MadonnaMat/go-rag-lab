@@ -59,7 +59,7 @@ scripts/ollama-dev --daemon   # installs Ollama if needed, pulls the embedding +
 ```
 
 Or, for the one-command version of all of the above plus ingesting
-`sample_docs/` and starting the server: `make dev-up` (see `CLAUDE.md`).
+`lore_docs/` and starting the server: `make dev-up` (see `CLAUDE.md`).
 Then visit `http://localhost:8080/` for the chat page, or
 `http://localhost:8080/swagger/index.html` for the API docs.
 
@@ -88,7 +88,7 @@ docker exec -it $(docker compose ps -q db) psql -U rag -d rag -c "SELECT count(*
 docker exec -it $(docker compose ps -q db) psql -U rag -d rag -c "SELECT count(*) FROM chunks;"
 ```
 
-The sample corpus in `sample_docs/` is a small fictional-worldbuilding set
+The sample corpus in `lore_docs/` is a small fictional-worldbuilding set
 (the *Ulmarin*, an ocean-dwelling alien species) rather than real
 documentation — plenty of distinct semantic content to chunk/embed without
 depending on anything external.

@@ -26,7 +26,7 @@ doesn't exist yet, don't assume it does.
   `internal/store/migrations/*.sql` natively (see "Database migrations"
   below). Run once against a fresh database before `make ingest` or
   `cmd/serve` will work.
-- `make ingest` — runs the ingestion CLI natively against `sample_docs/`
+- `make ingest` — runs the ingestion CLI natively against `lore_docs/`
 - `make ci-verify` — CI only: brings up `db` + a pre-baked CI-only Ollama
   (see below), then builds and runs the `app` service against them for
   real. Not run by `make up` / local dev.
@@ -45,7 +45,7 @@ doesn't exist yet, don't assume it does.
   systemd service is running, pulls the embedding and chat models
 - `make dev-up` (`scripts/dev-up`) — one-command local verification loop:
   starts Ollama + `db` (only if not already running), migrates, ingests
-  `sample_docs/`, then runs `cmd/serve` in the foreground so you can go
+  `lore_docs/`, then runs `cmd/serve` in the foreground so you can go
   check the browser. Ctrl-C stops `cmd/serve` and, via a trap, anything
   else this specific invocation started — it leaves alone whatever was
   already running before it was called.
@@ -92,10 +92,28 @@ directly.
 Chat is a third orchestration layer, structurally parallel to
 `internal/retrieve`: `internal/chat` owns a hand-rolled streaming Ollama
 `/api/chat` client (same conventions as `internal/embedding/ollama.go` — no
-client library), the `retrieve_documents` tool (dispatched by name in
-`tools.go`, so a second tool is one new `tool_*.go` file plus one `switch`
-case), auto-compaction of long conversations, and a post-answer
-self-verification pass — and knows nothing about HTTP. `internal/api`'s
+client library) and four tools — `retrieve_documents` (semantic chunk
+search), `list_resources` (enumerate ingested docs), `get_resource` (read
+one whole `.md` off disk from `LORE_DIR`), and `lore_drop` (write a
+new/updated ulmarin doc to `LORE_DIR` and re-ingest just that file via
+`ingest.Ingester.IngestFile`, which also clears the ingest dir-hash).
+
+The tools live in their own package, `internal/chat/tools`: each is one
+file implementing a small `Tool` interface (`Name`/`Def`/`Available`/
+`Writes`/`OncePerTurn`/`Run`), registered in `tools.All()`. A tool is a
+pure `Run(ctx, Call, Deps) Result` — it knows nothing about `*Chatter`,
+Ollama, or SSE. `internal/chat/dispatch.go` is the seam: it builds a
+`tools.Deps` from the `Chatter`, advertises `tools.Available(deps)` (minus
+`Writes()` tools during the verify pass), runs the call, enforces the
+`OncePerTurn()` guard (one `lore_drop` per turn), and maps the `Result`
+back to conversation messages + `Event`s. Adding a tool is one new file in
+`internal/chat/tools` plus one line in `All()` — no `switch` to touch.
+`cmd/serve` now builds an `ingest.Ingester` too (not just `cmd/ingest`), to
+back `lore_drop`.
+
+Then auto-compaction of long conversations, and a post-answer
+self-verification pass that may call the read-only tools (everything but
+`lore_drop`) to fact-check its own draft — and knows nothing about HTTP. `internal/api`'s
 `POST /chat` is a thin SSE-emitting layer on top (`sse.go` maps each
 `chat.Event` to a named SSE frame: `tool_call`, `tool_result`, `thinking`,
 `token`, `compacting`, `compacted`, `verifying`, `revised`,
@@ -209,12 +227,18 @@ drift apart.
 - Document identity in the store is the **filename alone**, not the full
   disk path — see the comment on `ingest.ingestFile`. This was a real bug
   caught by comparing native vs. containerized ingestion runs: the
-  Dockerfile's `-dir=/app/sample_docs` vs. native `-dir=sample_docs`
+  Dockerfile's `-dir=/app/lore_docs` vs. native `-dir=lore_docs`
   produced two different path strings for the same file, so `ON CONFLICT
   (path)` never matched and rows duplicated instead of replacing. Don't
   reintroduce full-path identity without re-checking this.
 - Tests never touch the same database `make ingest` populates — see
   `TEST_DATABASE_URL` / `docker/initdb/01-create-test-db.sql`.
+- `IngestDir` reconciles: the `lore_docs/` directory is the source of
+  truth, so a full (non-skipped) run deletes any `documents` row whose
+  file is no longer on disk (`ingest.deleteOrphans`, cascading to chunks).
+  The runtime `IngestFile` path (chat `lore_drop`) only adds/updates — it
+  never deletes — but it clears the dir-hash, so the next `make ingest`
+  does a full reconciling run.
 
 ## The CI-only Ollama image (`docker/ollama-ci/`)
 

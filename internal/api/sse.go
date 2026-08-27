@@ -33,6 +33,12 @@ type sseToolResultPayload struct {
 	// (e.g. the retriever errored) — distinguishes "the search legitimately
 	// found nothing" from "the search couldn't run".
 	Error string `json:"error,omitempty"`
+	// Message and Payload are set instead of Results for the non-retrieval
+	// tools (list_resources / get_resource / lore_drop): Message is a
+	// human-readable one-liner for the status line, Payload is the exact
+	// JSON the tool returned to the model, for the UI to render.
+	Message string          `json:"message,omitempty"`
+	Payload json.RawMessage `json:"payload,omitempty"`
 }
 
 type sseThinkingPayload struct {
@@ -60,20 +66,29 @@ type sseErrorPayload struct {
 	Error string `json:"error"`
 }
 
+// toolResultPayload picks the right tool_result frame shape: an error, a
+// plain summary message (the non-retrieval tools), or retrieval chunks.
+func toolResultPayload(ev chat.Event) sseToolResultPayload {
+	if ev.Err != nil {
+		return sseToolResultPayload{Error: ev.Err.Error()}
+	}
+	if ev.ToolSummary != "" {
+		return sseToolResultPayload{Message: ev.ToolSummary, Payload: ev.ToolPayload}
+	}
+	results := make([]sseToolResultChunk, len(ev.ToolResult))
+	for i, r := range ev.ToolResult {
+		results[i] = sseToolResultChunk{Source: r.Source, Content: r.Content, Distance: r.Distance}
+	}
+	return sseToolResultPayload{Results: results}
+}
+
 // write maps a chat.Event to its named SSE event and flushes it.
 func (e *sseEncoder) write(ev chat.Event) error {
 	switch ev.Type {
 	case chat.EventToolCall:
 		return e.frame("tool_call", sseToolCallPayload{Tool: ev.ToolName, Args: ev.ToolArgs})
 	case chat.EventToolResult:
-		if ev.Err != nil {
-			return e.frame("tool_result", sseToolResultPayload{Error: ev.Err.Error()})
-		}
-		results := make([]sseToolResultChunk, len(ev.ToolResult))
-		for i, r := range ev.ToolResult {
-			results[i] = sseToolResultChunk{Source: r.Source, Content: r.Content, Distance: r.Distance}
-		}
-		return e.frame("tool_result", sseToolResultPayload{Results: results})
+		return e.frame("tool_result", toolResultPayload(ev))
 	case chat.EventThinking:
 		return e.frame("thinking", sseThinkingPayload{Content: ev.Token})
 	case chat.EventToken:

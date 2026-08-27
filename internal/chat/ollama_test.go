@@ -10,6 +10,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/MadonnaMat/go-rag-lab/internal/chat/tools"
 )
 
 func TestOllamaChat_StreamsTokenDeltas(t *testing.T) {
@@ -66,7 +68,7 @@ func TestOllamaChat_ParsesToolCalls(t *testing.T) {
 
 	c := NewOllamaChat(srv.URL, "test-model")
 	var got chatStreamLine
-	err := c.Chat(context.Background(), nil, []toolDef{retrieveToolDef()}, func(line chatStreamLine) error {
+	err := c.Chat(context.Background(), nil, []tools.Def{tools.All()[0].Def()}, func(line chatStreamLine) error {
 		got = line
 		return nil
 	})

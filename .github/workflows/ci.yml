@@ -8,7 +8,10 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # ci-verify's two chat smoke tests drive the CPU-only CI Ollama
+    # (qwen3:0.6b) through several slow /api/chat calls each and retry on
+    # timeout — 20 min was too tight once the chat path grew a tool loop.
+    timeout-minutes: 30
     env:
       # Same variable name make test reads locally (via the Makefile's
       # `include .env`). No .env file exists in CI, so that include is a

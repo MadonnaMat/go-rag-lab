@@ -57,7 +57,7 @@ services:
       # not just /chat's serve-side use — ingest runs a chat call too.
       OLLAMA_CHAT_MODEL: ${OLLAMA_CHAT_MODEL:-qwen3:8b}
     volumes:
-      - ./sample_docs:/app/sample_docs:ro
+      - ./lore_docs:/app/lore_docs:ro
 
   # One-shot: `docker compose run --rm migrate`, not `up` — applies
   # internal/store/migrations against db. Schema setup is a deliberate,
@@ -89,6 +89,13 @@ services:
       OLLAMA_EMBED_MODEL: ${OLLAMA_EMBED_MODEL:-nomic-embed-text}
       OLLAMA_CHAT_MODEL: ${OLLAMA_CHAT_MODEL:-qwen3:8b}
       SERVER_ADDR: ${SERVER_ADDR:-:8080}
+      # Where the chat get_resource / lore_drop tools read and write .md
+      # docs. Bind-mounted below (NOT :ro) so a lore_drop persists back to
+      # the host lore_docs/ and a later `make ingest` / `docker compose up
+      # app` re-ingests it.
+      LORE_DIR: /app/lore_docs
+    volumes:
+      - ./lore_docs:/app/lore_docs
     ports:
       - "${SERVER_PORT:-8080}:8080"
 

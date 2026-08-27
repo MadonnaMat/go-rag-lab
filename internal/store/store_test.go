@@ -159,3 +159,35 @@ func TestIngestDirHash_RoundTrip(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "hash-2", got, "SetIngestDirHash should upsert the singleton row, not insert a second one")
 }
+
+func TestListDocuments(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+	const pathA = "store_test.go::list_docs_a"
+	const pathB = "store_test.go::list_docs_b"
+	cleanupDocument(t, s, pathA)
+	cleanupDocument(t, s, pathB)
+
+	emptyVec := make([]float32, 768)
+	idA, err := s.UpsertDocument(ctx, pathA, "h")
+	require.NoError(t, err)
+	require.NoError(t, s.ReplaceChunks(ctx, idA, []Chunk{
+		{Index: 0, Content: "a0", Embedding: emptyVec},
+		{Index: 1, Content: "a1", Embedding: emptyVec},
+	}))
+	idB, err := s.UpsertDocument(ctx, pathB, "h")
+	require.NoError(t, err)
+	require.NoError(t, s.ReplaceChunks(ctx, idB, []Chunk{
+		{Index: 0, Content: "b0", Embedding: emptyVec},
+	}))
+
+	docs, err := s.ListDocuments(ctx)
+	require.NoError(t, err)
+
+	got := map[string]int{}
+	for _, d := range docs {
+		got[d.Path] = d.Chunks
+	}
+	assert.Equal(t, 2, got[pathA])
+	assert.Equal(t, 1, got[pathB])
+}

@@ -24,7 +24,7 @@ import (
 )
 
 func main() {
-	dir := flag.String("dir", "sample_docs", "directory of documents to ingest (non-recursive)")
+	dir := flag.String("dir", "lore_docs", "directory of documents to ingest (non-recursive)")
 	flag.Parse()
 
 	if err := run(*dir); err != nil {
@@ -68,6 +68,6 @@ func run(dir string) error {
 		fmt.Printf("Skipped: %q is unchanged since the last successful ingestion.\n", dir)
 		return nil
 	}
-	fmt.Printf("Documents: %d, Chunks: %d\n", result.Documents, result.Chunks)
+	fmt.Printf("Documents: %d, Chunks: %d, Deleted: %d\n", result.Documents, result.Chunks, result.Deleted)
 	return nil
 }
