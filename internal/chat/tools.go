@@ -32,7 +32,7 @@ func (c *Chatter) availableTools() []toolDef {
 // role:"tool" message to append to the conversation. Unknown tool names
 // get a structured error message fed back to the model rather than
 // failing the request.
-func (c *Chatter) dispatchTool(ctx context.Context, tc toolCall, emit func(Event) error) (chatMessage, error) {
+func (c *Chatter) dispatchTool(ctx context.Context, prior []chatMessage, tc toolCall, emit func(Event) error) (chatMessage, error) {
 	switch tc.Function.Name {
 	case retrieveToolName:
 		return c.runRetrieveTool(ctx, tc, emit)
@@ -41,7 +41,7 @@ func (c *Chatter) dispatchTool(ctx context.Context, tc toolCall, emit func(Event
 	case getResourceToolName:
 		return c.runGetResourceTool(ctx, tc, emit)
 	case loreDropToolName:
-		return c.runLoreDropTool(ctx, tc, emit)
+		return c.runLoreDropTool(ctx, prior, tc, emit)
 	default:
 		if err := emit(Event{Type: EventToolCall, ToolName: tc.Function.Name, ToolArgs: tc.Function.Arguments}); err != nil {
 			return chatMessage{}, err

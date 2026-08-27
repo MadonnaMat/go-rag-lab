@@ -152,7 +152,7 @@ func TestHandleChat_RealTCPStreaming(t *testing.T) {
 func TestHandleChat_ToolResultSummaryFrame(t *testing.T) {
 	chatter := &fakeChatter{events: []chat.Event{
 		{Type: chat.EventToolCall, ToolName: "list_resources", ToolArgs: map[string]any{}},
-		{Type: chat.EventToolResult, ToolSummary: "Created & re-ingested 06-ulmarin-cuisine.md (2 chunk(s))", ToolPayload: []byte(`[{"name":"a.md","chunks":3}]`)},
+		{Type: chat.EventToolResult, ToolSummary: "Created & re-ingested test-fixture-doc.md (2 chunk(s))", ToolPayload: []byte(`[{"name":"a.md","chunks":3}]`)},
 		{Type: chat.EventDone},
 	}}
 	router := NewRouter(&Handler{Chatter: chatter})
@@ -165,6 +165,6 @@ func TestHandleChat_ToolResultSummaryFrame(t *testing.T) {
 	out := rec.Body.String()
 	assert.Contains(t, out, "event: tool_result")
 	assert.Contains(t, out, `"message":`)
-	assert.Contains(t, out, `re-ingested 06-ulmarin-cuisine.md (2 chunk(s))`)
+	assert.Contains(t, out, `re-ingested test-fixture-doc.md (2 chunk(s))`)
 	assert.Contains(t, out, `"payload":[{"name":"a.md","chunks":3}]`)
 }

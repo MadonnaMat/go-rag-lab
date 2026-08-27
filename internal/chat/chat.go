@@ -187,7 +187,7 @@ func (c *Chatter) runLoop(ctx context.Context, messages []chatMessage, emit func
 		}
 
 		messages = append(messages, draft)
-		toolMessages, err := c.executeToolCalls(ctx, draft.ToolCalls, emit)
+		toolMessages, err := c.executeToolCalls(ctx, messages, draft.ToolCalls, emit)
 		if err != nil {
 			return c.emitFatal(emit, err)
 		}
@@ -245,10 +245,14 @@ func (c *Chatter) streamTurn(ctx context.Context, messages []chatMessage, emit f
 
 // executeToolCalls dispatches each tool call by name (see tools.go),
 // returning the role:"tool" messages to append to the conversation.
-func (c *Chatter) executeToolCalls(ctx context.Context, calls []toolCall, emit func(Event) error) ([]chatMessage, error) {
+func (c *Chatter) executeToolCalls(ctx context.Context, history []chatMessage, calls []toolCall, emit func(Event) error) ([]chatMessage, error) {
 	out := make([]chatMessage, 0, len(calls))
 	for _, tc := range calls {
-		msg, err := c.dispatchTool(ctx, tc, emit)
+		prior := make([]chatMessage, 0, len(history)+len(out))
+		prior = append(prior, history...)
+		prior = append(prior, out...)
+
+		msg, err := c.dispatchTool(ctx, prior, tc, emit)
 		if err != nil {
 			return nil, err
 		}

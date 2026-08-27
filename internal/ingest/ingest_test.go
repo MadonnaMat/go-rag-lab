@@ -298,12 +298,12 @@ func TestIngestFile(t *testing.T) {
 
 	ing := &Ingester{Store: st, Provider: provider, ChunkSize: 8, ChunkOverlap: 2}
 
-	n, err := ing.IngestFile(context.Background(), "06-ulmarin-cuisine.md", []byte("The ulmarin eat moss and lichen."))
+	n, err := ing.IngestFile(context.Background(), "test-fixture-doc.md", []byte("The ulmarin eat moss and lichen."))
 	require.NoError(t, err)
 	assert.Positive(t, n)
 
 	// Document upserted under its bare filename.
-	id, ok := st.documents["06-ulmarin-cuisine.md"]
+	id, ok := st.documents["test-fixture-doc.md"]
 	require.True(t, ok)
 	assert.Len(t, st.chunksByDoc[id], n)
 
@@ -311,9 +311,9 @@ func TestIngestFile(t *testing.T) {
 	assert.Empty(t, st.dirHash)
 
 	// Re-running with new content replaces chunks under the same id.
-	n2, err := ing.IngestFile(context.Background(), "06-ulmarin-cuisine.md", []byte("Revised."))
+	n2, err := ing.IngestFile(context.Background(), "test-fixture-doc.md", []byte("Revised."))
 	require.NoError(t, err)
-	assert.Equal(t, id, st.documents["06-ulmarin-cuisine.md"])
+	assert.Equal(t, id, st.documents["test-fixture-doc.md"])
 	assert.Len(t, st.chunksByDoc[id], n2)
 }
 
