@@ -134,16 +134,24 @@ function chatApp() {
           }
           break;
         }
-        case "tool_result":
-          this.setStatus(
-            idx,
-            data.error
-              ? `Tool failed: ${data.error}`
-              : data.message
-                ? data.message
-                : `Found ${(data.results || []).length} matching chunk(s).`
-          );
+        case "tool_result": {
+          if (data.error) {
+            this.setStatus(idx, `Tool failed: ${data.error}`);
+            break;
+          }
+          if (data.message) {
+            // list_resources hands back an array of {name, chunks} — show
+            // the filenames inline rather than just the count.
+            let extra = "";
+            if (Array.isArray(data.payload) && data.payload.every((r) => r && r.name)) {
+              extra = ` — ${data.payload.map((r) => r.name).join(", ")}`;
+            }
+            this.setStatus(idx, `${data.message}${extra}`);
+            break;
+          }
+          this.setStatus(idx, `Found ${(data.results || []).length} matching chunk(s).`);
           break;
+        }
         case "compacting":
           this.setStatus(idx, "Summarizing earlier conversation…");
           break;

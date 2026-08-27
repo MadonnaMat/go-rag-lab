@@ -2,6 +2,7 @@ package chat
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -92,7 +93,11 @@ type Event struct {
 	// ToolSummary is a human-readable one-liner describing a non-retrieval
 	// tool's result (list_resources / get_resource / lore_drop) for the UI
 	// status line — retrieval uses ToolResult instead.
-	ToolSummary   string
+	ToolSummary string
+	// ToolPayload is the exact JSON a non-retrieval tool handed back to the
+	// model, passed through to the SSE client so the UI can render it
+	// (e.g. the document list from list_resources).
+	ToolPayload   json.RawMessage
 	Token         string
 	Summary       string
 	Revised       string

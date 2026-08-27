@@ -2,6 +2,7 @@ package chat
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 )
 
@@ -78,7 +79,7 @@ func toolErrorMessage(tc toolCall, emit func(Event) error, toolErr error) (chatM
 // and builds the role:"tool" message carrying payload (JSON-marshaled) to
 // the model.
 func toolResultMessage(tc toolCall, emit func(Event) error, summary string, payload string) (chatMessage, error) {
-	if err := emit(Event{Type: EventToolResult, ToolSummary: summary}); err != nil {
+	if err := emit(Event{Type: EventToolResult, ToolSummary: summary, ToolPayload: json.RawMessage(payload)}); err != nil {
 		return chatMessage{}, err
 	}
 	return chatMessage{
