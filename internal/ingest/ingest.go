@@ -190,7 +190,7 @@ func truncateValidUTF8(s string, n int) string {
 // ingestFile stores content under identity, its filename alone rather
 // than the full path — dir may be an absolute path, a relative one, or a
 // container mount point that differs between environments (compare
-// running natively vs. the Dockerfile's -dir=/app/sample_docs), and
+// running natively vs. the Dockerfile's -dir=/app/lore_docs), and
 // document identity must stay stable across all of them so re-ingesting
 // the same file replaces its chunks instead of duplicating them under a
 // second, differently-prefixed path.

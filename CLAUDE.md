@@ -26,7 +26,7 @@ doesn't exist yet, don't assume it does.
   `internal/store/migrations/*.sql` natively (see "Database migrations"
   below). Run once against a fresh database before `make ingest` or
   `cmd/serve` will work.
-- `make ingest` — runs the ingestion CLI natively against `sample_docs/`
+- `make ingest` — runs the ingestion CLI natively against `lore_docs/`
 - `make ci-verify` — CI only: brings up `db` + a pre-baked CI-only Ollama
   (see below), then builds and runs the `app` service against them for
   real. Not run by `make up` / local dev.
@@ -45,7 +45,7 @@ doesn't exist yet, don't assume it does.
   systemd service is running, pulls the embedding and chat models
 - `make dev-up` (`scripts/dev-up`) — one-command local verification loop:
   starts Ollama + `db` (only if not already running), migrates, ingests
-  `sample_docs/`, then runs `cmd/serve` in the foreground so you can go
+  `lore_docs/`, then runs `cmd/serve` in the foreground so you can go
   check the browser. Ctrl-C stops `cmd/serve` and, via a trap, anything
   else this specific invocation started — it leaves alone whatever was
   already running before it was called.
@@ -209,7 +209,7 @@ drift apart.
 - Document identity in the store is the **filename alone**, not the full
   disk path — see the comment on `ingest.ingestFile`. This was a real bug
   caught by comparing native vs. containerized ingestion runs: the
-  Dockerfile's `-dir=/app/sample_docs` vs. native `-dir=sample_docs`
+  Dockerfile's `-dir=/app/lore_docs` vs. native `-dir=lore_docs`
   produced two different path strings for the same file, so `ON CONFLICT
   (path)` never matched and rows duplicated instead of replacing. Don't
   reintroduce full-path identity without re-checking this.

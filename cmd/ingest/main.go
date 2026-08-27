@@ -24,7 +24,7 @@ import (
 )
 
 func main() {
-	dir := flag.String("dir", "sample_docs", "directory of documents to ingest (non-recursive)")
+	dir := flag.String("dir", "lore_docs", "directory of documents to ingest (non-recursive)")
 	flag.Parse()
 
 	if err := run(*dir); err != nil {
