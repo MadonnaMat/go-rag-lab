@@ -106,6 +106,26 @@ func (ing *Ingester) IngestDir(ctx context.Context, dir string) (Result, error) 
 	return result, nil
 }
 
+// IngestFile chunks, embeds and upserts a single document at runtime —
+// e.g. from the chat lore_drop tool, which writes a new/updated .md file
+// and then re-ingests just that one file rather than re-scanning the whole
+// directory. identity is the bare filename, matching IngestDir's
+// convention (see ingestFile's docstring).
+//
+// It also clears the stored dir hash, so the next IngestDir run does a
+// full re-ingest (and regenerates the now-stale corpus summary) instead of
+// short-circuiting on an unchanged-directory match.
+func (ing *Ingester) IngestFile(ctx context.Context, identity string, content []byte) (int, error) {
+	n, err := ing.ingestFile(ctx, identity, content)
+	if err != nil {
+		return 0, err
+	}
+	if err := ing.Store.SetIngestDirHash(ctx, ""); err != nil {
+		return n, fmt.Errorf("invalidate ingest dir hash: %w", err)
+	}
+	return n, nil
+}
+
 // readDirFiles lists every regular file directly inside dir (non-recursive)
 // and reads its content, returning names in a fixed (sorted-by-name) order
 // — os.ReadDir already guarantees this — so output/error messages and the

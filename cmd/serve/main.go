@@ -20,6 +20,7 @@ import (
 	"github.com/MadonnaMat/go-rag-lab/internal/chat/prompts"
 	"github.com/MadonnaMat/go-rag-lab/internal/config"
 	"github.com/MadonnaMat/go-rag-lab/internal/embedding"
+	"github.com/MadonnaMat/go-rag-lab/internal/ingest"
 	"github.com/MadonnaMat/go-rag-lab/internal/retrieve"
 	"github.com/MadonnaMat/go-rag-lab/internal/store"
 
@@ -70,6 +71,14 @@ func run(addrFlag string) error {
 	if err != nil {
 		log.Printf("warning: could not determine %s's context length, falling back to a default: %v", cfg.OllamaChatModel, err)
 	}
+	ingester := &ingest.Ingester{
+		Store:        s,
+		Provider:     provider,
+		Summarizer:   chatClient,
+		ChunkSize:    cfg.ChunkSize,
+		ChunkOverlap: cfg.ChunkOverlap,
+	}
+
 	chatter := &chat.Chatter{
 		Client:            chatClient,
 		Retriever:         retriever,
@@ -78,6 +87,9 @@ func run(addrFlag string) error {
 		MaxToolIterations: 4,
 		ContextTokens:     contextTokens,
 		Summaries:         s,
+		Docs:              s,
+		Loremaster:        ingester,
+		LoreDir:           cfg.LoreDir,
 	}
 
 	handler := api.NewRouter(&api.Handler{Retriever: retriever, Chatter: chatter, DefaultTopK: cfg.TopK})

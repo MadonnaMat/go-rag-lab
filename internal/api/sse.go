@@ -33,6 +33,10 @@ type sseToolResultPayload struct {
 	// (e.g. the retriever errored) — distinguishes "the search legitimately
 	// found nothing" from "the search couldn't run".
 	Error string `json:"error,omitempty"`
+	// Message is set instead of Results for the non-retrieval tools
+	// (list_resources / get_resource / lore_drop): a human-readable
+	// one-liner for the UI status line.
+	Message string `json:"message,omitempty"`
 }
 
 type sseThinkingPayload struct {
@@ -68,6 +72,9 @@ func (e *sseEncoder) write(ev chat.Event) error {
 	case chat.EventToolResult:
 		if ev.Err != nil {
 			return e.frame("tool_result", sseToolResultPayload{Error: ev.Err.Error()})
+		}
+		if ev.ToolSummary != "" {
+			return e.frame("tool_result", sseToolResultPayload{Message: ev.ToolSummary})
 		}
 		results := make([]sseToolResultChunk, len(ev.ToolResult))
 		for i, r := range ev.ToolResult {

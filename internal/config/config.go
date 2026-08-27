@@ -21,6 +21,10 @@ type Config struct {
 	ChunkOverlap      int
 	ServerAddr        string
 	TopK              int
+	// LoreDir is the document directory cmd/ingest reads and the chat
+	// get_resource / lore_drop tools read and write. Same default as
+	// cmd/ingest's -dir flag.
+	LoreDir string
 }
 
 // Load reads Config from the environment, applying defaults for anything
@@ -69,6 +73,7 @@ func Load() (Config, error) {
 		ChunkOverlap:    chunkOverlap,
 		ServerAddr:      getEnv("SERVER_ADDR", ":8080"),
 		TopK:            topK,
+		LoreDir:         getEnv("LORE_DIR", "lore_docs"),
 	}, nil
 }
 

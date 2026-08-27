@@ -114,15 +114,34 @@ function chatApp() {
           // keeps replacing it rather than piling up.
           this.setStatus(idx, "Thinking…");
           break;
-        case "tool_call":
-          this.setStatus(idx, `Searching documents: "${(data.args && data.args.query) || ""}"…`);
+        case "tool_call": {
+          const args = data.args || {};
+          switch (data.tool) {
+            case "list_resources":
+              this.setStatus(idx, "Listing documents…");
+              break;
+            case "get_resource":
+              this.setStatus(idx, `Reading ${args.name || "document"}…`);
+              break;
+            case "lore_drop":
+              this.setStatus(
+                idx,
+                `Saving new lore: ${args.filename || "document"}${args.reason ? ` (${args.reason})` : ""}…`
+              );
+              break;
+            default:
+              this.setStatus(idx, `Searching documents: "${args.query || ""}"…`);
+          }
           break;
+        }
         case "tool_result":
           this.setStatus(
             idx,
             data.error
-              ? `Search failed: ${data.error}`
-              : `Found ${(data.results || []).length} matching chunk(s).`
+              ? `Tool failed: ${data.error}`
+              : data.message
+                ? data.message
+                : `Found ${(data.results || []).length} matching chunk(s).`
           );
           break;
         case "compacting":

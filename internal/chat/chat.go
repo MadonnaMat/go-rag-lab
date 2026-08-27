@@ -20,6 +20,17 @@ type SummaryStore interface {
 	GetCorpusSummary(ctx context.Context) (string, error)
 }
 
+// DocLister is the subset of *store.Store the list_resources tool needs.
+type DocLister interface {
+	ListDocuments(ctx context.Context) ([]store.DocumentInfo, error)
+}
+
+// Loremaster is the subset of *ingest.Ingester the lore_drop tool needs:
+// re-ingest one just-written document by its bare filename.
+type Loremaster interface {
+	IngestFile(ctx context.Context, identity string, content []byte) (int, error)
+}
+
 // Chatter orchestrates a tool-calling conversation with Ollama.
 type Chatter struct {
 	Client            *OllamaChat
@@ -38,6 +49,16 @@ type Chatter struct {
 	// running. A lookup error or empty result is silently ignored: chat
 	// still works without a summary.
 	Summaries SummaryStore
+
+	// Docs, Loremaster and LoreDir back the list_resources / get_resource /
+	// lore_drop tools. Each is optional: a tool whose dependency is nil (or,
+	// for the disk-backed tools, LoreDir == "") is omitted from
+	// availableTools() and its dispatch case returns a structured error.
+	Docs       DocLister
+	Loremaster Loremaster
+	// LoreDir is the directory get_resource reads .md files from and
+	// lore_drop writes them to — the same directory cmd/ingest ingests.
+	LoreDir string
 }
 
 // Message is one turn in a client-supplied conversation history.
@@ -68,6 +89,10 @@ type Event struct {
 	ToolName      string
 	ToolArgs      map[string]any
 	ToolResult    []toolResultChunk
+	// ToolSummary is a human-readable one-liner describing a non-retrieval
+	// tool's result (list_resources / get_resource / lore_drop) for the UI
+	// status line — retrieval uses ToolResult instead.
+	ToolSummary   string
 	Token         string
 	Summary       string
 	Revised       string
@@ -191,7 +216,7 @@ func (c *Chatter) streamTurn(ctx context.Context, messages []chatMessage, emit f
 	var draft chatMessage
 	var sawToolCall bool
 
-	err := c.Client.Chat(ctx, messages, availableTools(), func(line chatStreamLine) error {
+	err := c.Client.Chat(ctx, messages, c.availableTools(), func(line chatStreamLine) error {
 		if len(line.Message.ToolCalls) > 0 {
 			sawToolCall = true
 			draft.ToolCalls = append(draft.ToolCalls, line.Message.ToolCalls...)
