@@ -54,8 +54,10 @@ func (c *Chatter) toolDefs(readOnly bool) []tools.Def {
 // executeToolCalls dispatches each model-issued tool call in order,
 // returning the role:"tool" messages to append to the conversation.
 // succeeded tracks once-per-turn tools that have already run in this Run,
-// so a repeat call is refused rather than executed.
-func (c *Chatter) executeToolCalls(ctx context.Context, calls []toolCall, succeeded map[string]bool, emit func(Event) error) ([]chatMessage, error) {
+// so a repeat call is refused rather than executed. When readOnly is set
+// (the verification pass), any tool that writes to the corpus is refused
+// outright — not merely left unadvertised.
+func (c *Chatter) executeToolCalls(ctx context.Context, calls []toolCall, succeeded map[string]bool, readOnly bool, emit func(Event) error) ([]chatMessage, error) {
 	deps := c.toolDeps()
 	out := make([]chatMessage, 0, len(calls))
 	for _, wire := range calls {
@@ -65,7 +67,7 @@ func (c *Chatter) executeToolCalls(ctx context.Context, calls []toolCall, succee
 			return nil, err
 		}
 
-		res := runTool(ctx, deps, call, succeeded)
+		res := runTool(ctx, deps, call, succeeded, readOnly)
 		msg, err := c.emitToolResult(call, res, emit)
 		if err != nil {
 			return nil, err
@@ -76,12 +78,15 @@ func (c *Chatter) executeToolCalls(ctx context.Context, calls []toolCall, succee
 }
 
 // runTool resolves a call to a registered, available tool and runs it,
-// applying the once-per-turn guard. It never returns a Go error — a
-// failure is a Result.Err, fed back to the model.
-func runTool(ctx context.Context, deps tools.Deps, call tools.Call, succeeded map[string]bool) tools.Result {
+// applying the read-only and once-per-turn guards. It never returns a Go
+// error — a failure is a Result.Err, fed back to the model.
+func runTool(ctx context.Context, deps tools.Deps, call tools.Call, succeeded map[string]bool, readOnly bool) tools.Result {
 	tool, ok := tools.Find(call.Name)
 	if !ok || !tool.Available(deps) {
 		return tools.Result{Err: fmt.Errorf("unknown tool %q", call.Name)}
+	}
+	if readOnly && tool.Writes() {
+		return tools.Result{Err: fmt.Errorf("%s writes to the corpus and cannot be used here — this is a read-only step", call.Name)}
 	}
 	if tool.OncePerTurn() && succeeded[call.Name] {
 		return tools.Result{Err: fmt.Errorf("%s was already used in this turn — do not call it again; answer the user now using what you have", call.Name)}

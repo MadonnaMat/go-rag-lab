@@ -42,7 +42,7 @@ func (c *Chatter) verify(ctx context.Context, messages []chatMessage, draftConte
 		}
 
 		msgs = append(msgs, draft)
-		toolMessages, err := c.executeToolCalls(ctx, draft.ToolCalls, succeeded, emit)
+		toolMessages, err := c.executeToolCalls(ctx, draft.ToolCalls, succeeded, true, emit)
 		if err != nil {
 			return "", err
 		}

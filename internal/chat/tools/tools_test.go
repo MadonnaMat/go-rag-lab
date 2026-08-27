@@ -167,6 +167,29 @@ func TestLoreDrop_AppendKeepsExistingAndDropsDuplicates(t *testing.T) {
 	assert.Contains(t, string(lm.content), "Brand new paragraph.")
 }
 
+func TestLoreDrop_AppendKeepsInteriorParagraphThatCoincides(t *testing.T) {
+	dir := t.TempDir()
+	// The doc already contains a "## Notes" heading somewhere.
+	original := "# Doc\n\n## Notes\n\nExisting note.\n"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "test-fixture-doc.md"), []byte(original), 0o644))
+
+	lm := &fakeLoremaster{}
+	// New section reuses the "## Notes" heading as an interior paragraph —
+	// it must not be dropped just because it appears earlier in the file.
+	res := run(t, "lore_drop", map[string]any{
+		"filename": "test-fixture-doc.md",
+		"content":  "## History\n\nSome history.\n\n## Notes\n\nA second, different note.",
+		"mode":     "append",
+	}, Deps{LoreDir: dir, Loremaster: lm})
+
+	require.NoError(t, res.Err)
+	got, err := os.ReadFile(filepath.Join(dir, "test-fixture-doc.md"))
+	require.NoError(t, err)
+	assert.Contains(t, string(got), "## History")
+	assert.Contains(t, string(got), "A second, different note.")
+	assert.Equal(t, 2, strings.Count(string(got), "## Notes"), "the reused heading is kept, not filtered")
+}
+
 func TestLoreDrop_AppendNothingNew(t *testing.T) {
 	dir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "test-fixture-doc.md"), []byte("# Doc\n\nAll of it.\n"), 0o644))

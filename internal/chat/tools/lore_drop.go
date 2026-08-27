@@ -8,7 +8,15 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 )
+
+// loreDropMu serializes lore_drop's read-modify-write-then-reingest cycle.
+// Chat is stateless and cmd/serve serves requests concurrently, so two
+// turns appending to the same file would otherwise both read the old
+// bytes and the second write would clobber the first. Writes are rare, so
+// one lock for all files is fine.
+var loreDropMu sync.Mutex
 
 // loreDrop writes ulmarin lore into the corpus and re-ingests it.
 type loreDrop struct{}
@@ -72,6 +80,9 @@ func (loreDrop) Run(ctx context.Context, call Call, deps Deps) Result {
 		return errResult(fmt.Errorf("missing required argument %q", "content"))
 	}
 
+	loreDropMu.Lock()
+	defer loreDropMu.Unlock()
+
 	path := filepath.Join(deps.LoreDir, base)
 	finalContent, action, err := resolveLoreContent(path, content, mode)
 	if err != nil {
@@ -118,9 +129,13 @@ func resolveLoreContent(path, content, mode string) (finalContent, action string
 	}
 
 	// Default: append, keeping the existing document intact. Weak models
-	// tend to re-send big slabs of the current file alongside their new
-	// text, so drop any paragraph that already appears verbatim.
-	fresh := newParagraphs(string(existing), content)
+	// tend to re-send a slab of the current file as a preamble to their
+	// new text, so strip a *leading* run of paragraphs that already appear
+	// in the document — but stop at the first genuinely-new paragraph and
+	// keep everything after it verbatim, so an interior paragraph that
+	// merely coincides with existing text (a shared heading, a short
+	// sentence) is never dropped.
+	fresh := stripEchoedPreamble(string(existing), content)
 	if fresh == "" {
 		return "", "", errors.New("nothing new to append — that content is already in the document; pass only the genuinely new section, or use mode \"replace\"")
 	}
@@ -128,10 +143,12 @@ func resolveLoreContent(path, content, mode string) (finalContent, action string
 	return joined, "appended", nil
 }
 
-// newParagraphs returns the blank-line-separated paragraphs of content
-// that don't already appear (trimmed) in existing, rejoined with blank
-// lines.
-func newParagraphs(existing, content string) string {
+// stripEchoedPreamble drops the leading run of content's blank-line-
+// separated paragraphs that already appear (trimmed) anywhere in existing,
+// returning the remaining paragraphs rejoined with blank lines. It stops
+// at the first paragraph that isn't already present, so only a
+// re-transmitted preamble is removed.
+func stripEchoedPreamble(existing, content string) string {
 	seen := map[string]struct{}{}
 	for _, p := range strings.Split(existing, "\n\n") {
 		if t := strings.TrimSpace(p); t != "" {
@@ -139,18 +156,21 @@ func newParagraphs(existing, content string) string {
 		}
 	}
 
-	var kept []string
-	for _, p := range strings.Split(content, "\n\n") {
-		t := strings.TrimSpace(p)
+	paras := strings.Split(content, "\n\n")
+	start := 0
+	for start < len(paras) {
+		t := strings.TrimSpace(paras[start])
 		if t == "" {
+			start++
 			continue
 		}
-		if _, dup := seen[t]; dup {
-			continue
+		if _, dup := seen[t]; !dup {
+			break
 		}
-		kept = append(kept, t)
+		start++
 	}
-	return strings.Join(kept, "\n\n")
+
+	return strings.TrimSpace(strings.Join(paras[start:], "\n\n"))
 }
 
 func capitalize(s string) string {

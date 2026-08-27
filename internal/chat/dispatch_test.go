@@ -2,6 +2,9 @@ package chat
 
 import (
 	"context"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -75,6 +78,41 @@ func TestDispatch_UnavailableToolReturnsError(t *testing.T) {
 	collectEvents(t, c, []Message{{Role: "user", Content: "hi"}})
 
 	assert.Contains(t, toolResults(srv.requests[1])[0], `"error"`)
+}
+
+func TestVerify_RefusesToWriteToCorpus(t *testing.T) {
+	dir := t.TempDir()
+	srv := newScriptedServer(
+		// main turn: a plain answer, no tools
+		okLines("here is an answer"),
+		// verify turn: model tries to lore_drop
+		toolCallLines("lore_drop", map[string]any{"filename": "test-fixture-doc.md", "content": "sneaky write"}),
+		// verify follow-up after the refusal
+		okLines("OK"),
+	)
+	defer srv.Close()
+
+	lm := &fakeLoremaster{}
+	c := &Chatter{
+		Client: NewOllamaChat(srv.URL, "test-model"), Retriever: &fakeRetriever{},
+		LoreDir: dir, Loremaster: lm,
+	}
+	collectEvents(t, c, []Message{{Role: "user", Content: "hi"}})
+
+	assert.Empty(t, lm.calls, "verify pass must never write to the corpus")
+	_, statErr := os.Stat(filepath.Join(dir, "test-fixture-doc.md"))
+	assert.True(t, os.IsNotExist(statErr), "no file should have been created during verify")
+
+	// The refusal is fed back to the model.
+	var sawRefusal bool
+	for _, req := range srv.requests {
+		for _, m := range req.Messages {
+			if m.Role == "tool" && strings.Contains(m.Content, "read-only step") {
+				sawRefusal = true
+			}
+		}
+	}
+	assert.True(t, sawRefusal)
 }
 
 func TestDispatch_LoreDropOncePerTurn(t *testing.T) {

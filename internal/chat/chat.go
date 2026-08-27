@@ -185,7 +185,7 @@ func (c *Chatter) runLoop(ctx context.Context, messages []chatMessage, emit func
 		}
 
 		messages = append(messages, draft)
-		toolMessages, err := c.executeToolCalls(ctx, draft.ToolCalls, succeeded, emit)
+		toolMessages, err := c.executeToolCalls(ctx, draft.ToolCalls, succeeded, false, emit)
 		if err != nil {
 			return c.emitFatal(emit, err)
 		}
