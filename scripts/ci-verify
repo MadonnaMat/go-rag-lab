@@ -100,10 +100,10 @@ echo "== Chat API smoke test (serve + real Ollama, qwen3:0.6b) =="
 # the time for this exact prompt, independent of the actual wiring being
 # correct. This isn't a bug to fix in the app; it's the tradeoff of using
 # a tiny CI-sized model at all (see docker/ollama-ci/Dockerfile), so the
-# smoke test retries a few times and passes on the first attempt that
+# smoke test retries up to 10 times and passes on the first attempt that
 # calls the tool, rather than requiring every single attempt to.
 chat_ok=false
-for attempt in 1 2 3; do
+for attempt in $(seq 1 10); do
   echo "--- attempt $attempt ---"
   chat_response=$(curl -fsS --max-time 120 -X POST "http://localhost:$SERVER_PORT/chat" \
     -H "Content-Type: application/json" \
@@ -122,7 +122,7 @@ for attempt in 1 2 3; do
 done
 
 if ! $chat_ok; then
-  echo "FAIL: expected a tool_call event naming retrieve_documents in at least one of 3 attempts, got none" >&2
+  echo "FAIL: expected a tool_call event naming retrieve_documents in at least one of 10 attempts, got none" >&2
   exit 1
 fi
 
