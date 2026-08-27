@@ -33,6 +33,11 @@ func newChromedpContext(t *testing.T) context.Context {
 	opts := append(chromedp.DefaultExecAllocatorOptions[:],
 		chromedp.Flag("headless", true),
 		chromedp.Flag("no-sandbox", true), // needed when running as root, e.g. in CI containers
+		// GitHub Actions runners default /dev/shm to 64MB, too small for
+		// Chrome's shared memory use — without this, Chrome can crash or
+		// hang on startup, surfacing as chromedp's "websocket url timeout
+		// reached" rather than any more obvious error.
+		chromedp.Flag("disable-dev-shm-usage", true),
 	)
 	allocCtx, cancelAlloc := chromedp.NewExecAllocator(context.Background(), opts...)
 	t.Cleanup(cancelAlloc)
@@ -69,7 +74,7 @@ func TestWeb_ChatFlow(t *testing.T) {
 	srv := httptest.NewServer(NewRouter(&Handler{Chatter: chatter}))
 	defer srv.Close()
 
-	ctx, cancel := context.WithTimeout(newChromedpContext(t), 30*time.Second)
+	ctx, cancel := context.WithTimeout(newChromedpContext(t), 60*time.Second)
 	defer cancel()
 
 	const statusSel = `#messages .message[data-role="assistant"] ~ p.status`
@@ -122,7 +127,7 @@ func TestWeb_CompactIndicatorClick(t *testing.T) {
 	srv := httptest.NewServer(NewRouter(&Handler{Chatter: chatter}))
 	defer srv.Close()
 
-	ctx, cancel := context.WithTimeout(newChromedpContext(t), 30*time.Second)
+	ctx, cancel := context.WithTimeout(newChromedpContext(t), 60*time.Second)
 	defer cancel()
 
 	err := chromedp.Run(ctx,
