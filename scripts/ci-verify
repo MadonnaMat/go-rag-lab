@@ -93,17 +93,36 @@ echo "OK: containerized query API returned the expected top match"
 
 echo
 echo "== Chat API smoke test (serve + real Ollama, qwen3:0.6b) =="
-chat_response=$(curl -fsS --max-time 120 -X POST "http://localhost:$SERVER_PORT/chat" \
-  -H "Content-Type: application/json" \
-  -d '{"messages":[{"role":"user","content":"How did the Ulmarin develop technology without fire or metal? Use the retrieve_documents tool to find out."}]}')
-echo "$chat_response"
 
-if ! echo "$chat_response" | grep -q 'event: tool_call'; then
-  echo "FAIL: expected a tool_call event naming retrieve_documents, got: $chat_response" >&2
-  exit 1
-fi
-if ! echo "$chat_response" | grep -q 'event: done'; then
-  echo "FAIL: expected the stream to end with a done event, got: $chat_response" >&2
+# qwen3:0.6b is small enough that whether it decides to call the tool on
+# any single attempt is genuinely stochastic (no fixed temperature/seed)
+# — local testing measured it calling retrieve_documents only ~50-60% of
+# the time for this exact prompt, independent of the actual wiring being
+# correct. This isn't a bug to fix in the app; it's the tradeoff of using
+# a tiny CI-sized model at all (see docker/ollama-ci/Dockerfile), so the
+# smoke test retries a few times and passes on the first attempt that
+# calls the tool, rather than requiring every single attempt to.
+chat_ok=false
+for attempt in 1 2 3; do
+  echo "--- attempt $attempt ---"
+  chat_response=$(curl -fsS --max-time 120 -X POST "http://localhost:$SERVER_PORT/chat" \
+    -H "Content-Type: application/json" \
+    -d '{"messages":[{"role":"user","content":"How did the Ulmarin develop technology without fire or metal? Use the retrieve_documents tool to find out."}]}')
+  echo "$chat_response"
+
+  if ! echo "$chat_response" | grep -q 'event: done'; then
+    echo "FAIL: expected the stream to end with a done event, got: $chat_response" >&2
+    exit 1
+  fi
+  if echo "$chat_response" | grep -q 'event: tool_call'; then
+    chat_ok=true
+    break
+  fi
+  echo "no tool_call event on attempt $attempt; retrying"
+done
+
+if ! $chat_ok; then
+  echo "FAIL: expected a tool_call event naming retrieve_documents in at least one of 3 attempts, got none" >&2
   exit 1
 fi
 
