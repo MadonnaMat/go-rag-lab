@@ -76,6 +76,22 @@ func (f *fakeStore) ReplaceChunks(ctx context.Context, documentID int64, chunks 
 	return nil
 }
 
+func (f *fakeStore) ListDocuments(context.Context) ([]store.DocumentInfo, error) {
+	out := make([]store.DocumentInfo, 0, len(f.documents))
+	for path, id := range f.documents {
+		out = append(out, store.DocumentInfo{Path: path, Chunks: len(f.chunksByDoc[id])})
+	}
+	return out, nil
+}
+
+func (f *fakeStore) DeleteDocument(_ context.Context, path string) error {
+	if id, ok := f.documents[path]; ok {
+		delete(f.chunksByDoc, id)
+		delete(f.documents, path)
+	}
+	return nil
+}
+
 func writeFile(t *testing.T, dir, name, content string) {
 	t.Helper()
 	require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644))
@@ -299,4 +315,30 @@ func TestIngestFile(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, id, st.documents["06-ulmarin-cuisine.md"])
 	assert.Len(t, st.chunksByDoc[id], n2)
+}
+
+func TestIngestDir_DeletesOrphanedDocuments(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "keep.md", "kept content")
+	writeFile(t, dir, "gone.md", "doomed content")
+
+	st := newFakeStore()
+	ing := &Ingester{Store: st, Provider: &fakeProvider{}, ChunkSize: 100, ChunkOverlap: 0}
+
+	r, err := ing.IngestDir(context.Background(), dir)
+	require.NoError(t, err)
+	assert.Equal(t, 2, r.Documents)
+	assert.Equal(t, 0, r.Deleted)
+
+	// Remove one file and re-ingest.
+	require.NoError(t, os.Remove(filepath.Join(dir, "gone.md")))
+	r, err = ing.IngestDir(context.Background(), dir)
+	require.NoError(t, err)
+
+	assert.Equal(t, 1, r.Deleted)
+	_, stillThere := st.documents["gone.md"]
+	assert.False(t, stillThere, "orphaned document row should be deleted")
+	assert.Len(t, st.chunksByDoc, 1, "orphaned document's chunks should be gone too")
+	_, kept := st.documents["keep.md"]
+	assert.True(t, kept)
 }

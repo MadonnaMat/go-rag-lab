@@ -28,6 +28,11 @@ type Store interface {
 	UpsertCorpusSummary(ctx context.Context, summary string) error
 	GetIngestDirHash(ctx context.Context) (string, error)
 	SetIngestDirHash(ctx context.Context, hash string) error
+	// ListDocuments / DeleteDocument let IngestDir reconcile the store
+	// against the directory: a file removed from disk gets its row (and,
+	// via ON DELETE CASCADE, its chunks) deleted on the next run.
+	ListDocuments(ctx context.Context) ([]store.DocumentInfo, error)
+	DeleteDocument(ctx context.Context, path string) error
 }
 
 // Summarizer generates a short description of sampled corpus content —
@@ -57,6 +62,9 @@ type Ingester struct {
 type Result struct {
 	Documents int
 	Chunks    int
+	// Deleted is how many stored documents were removed because their file
+	// is no longer in dir (reconciliation — see deleteOrphans).
+	Deleted int
 	// Skipped is true when dir's content hash matched the last successful
 	// run's — nothing was chunked, embedded, or summarized.
 	Skipped bool
@@ -94,6 +102,12 @@ func (ing *Ingester) IngestDir(ctx context.Context, dir string) (Result, error) 
 	if err != nil {
 		return result, err
 	}
+
+	deleted, err := ing.deleteOrphans(ctx, names)
+	if err != nil {
+		return result, err
+	}
+	result.Deleted = deleted
 
 	if err := ing.maybeGenerateCorpusSummary(ctx, result, sample); err != nil {
 		return result, err
@@ -172,6 +186,35 @@ func (ing *Ingester) ingestFiles(ctx context.Context, names []string, files map[
 		}
 	}
 	return result, sample.String(), nil
+}
+
+// deleteOrphans removes any stored document whose identity (bare filename)
+// is not among names — i.e. its file was deleted from dir since the last
+// run. Chunks go with it via ON DELETE CASCADE. Returns how many were
+// removed. The store is the mirror of the directory: what's not on disk
+// shouldn't stay searchable.
+func (ing *Ingester) deleteOrphans(ctx context.Context, names []string) (int, error) {
+	onDisk := make(map[string]struct{}, len(names))
+	for _, n := range names {
+		onDisk[n] = struct{}{}
+	}
+
+	stored, err := ing.Store.ListDocuments(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("list stored documents: %w", err)
+	}
+
+	var deleted int
+	for _, d := range stored {
+		if _, ok := onDisk[d.Path]; ok {
+			continue
+		}
+		if err := ing.Store.DeleteDocument(ctx, d.Path); err != nil {
+			return deleted, fmt.Errorf("delete orphaned document %q: %w", d.Path, err)
+		}
+		deleted++
+	}
+	return deleted, nil
 }
 
 // maybeGenerateCorpusSummary runs the Summarizer (if configured) over

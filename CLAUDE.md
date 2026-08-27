@@ -223,6 +223,12 @@ drift apart.
   reintroduce full-path identity without re-checking this.
 - Tests never touch the same database `make ingest` populates — see
   `TEST_DATABASE_URL` / `docker/initdb/01-create-test-db.sql`.
+- `IngestDir` reconciles: the `lore_docs/` directory is the source of
+  truth, so a full (non-skipped) run deletes any `documents` row whose
+  file is no longer on disk (`ingest.deleteOrphans`, cascading to chunks).
+  The runtime `IngestFile` path (chat `lore_drop`) only adds/updates — it
+  never deletes — but it clears the dir-hash, so the next `make ingest`
+  does a full reconciling run.
 
 ## The CI-only Ollama image (`docker/ollama-ci/`)
 

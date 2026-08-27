@@ -80,11 +80,14 @@ func run(addrFlag string) error {
 	}
 
 	chatter := &chat.Chatter{
-		Client:            chatClient,
-		Retriever:         retriever,
-		DefaultTopK:       cfg.TopK,
-		SystemPrompt:      prompts.System,
-		MaxToolIterations: 4,
+		Client:       chatClient,
+		Retriever:    retriever,
+		DefaultTopK:  cfg.TopK,
+		SystemPrompt: prompts.System,
+		// A lore_drop answer legitimately chains retrieve_documents ->
+		// get_resource -> lore_drop -> final answer, so give the loop more
+		// than the bare retrieve-then-answer headroom.
+		MaxToolIterations: 6,
 		ContextTokens:     contextTokens,
 		Summaries:         s,
 		Docs:              s,
