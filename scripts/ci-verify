@@ -98,21 +98,23 @@ echo "== Chat API smoke test (serve + real Ollama, qwen3:0.6b) =="
 # any single attempt is genuinely stochastic (no fixed temperature/seed)
 # — local testing measured it calling retrieve_documents only ~50-60% of
 # the time for this exact prompt, independent of the actual wiring being
-# correct. This isn't a bug to fix in the app; it's the tradeoff of using
-# a tiny CI-sized model at all (see docker/ollama-ci/Dockerfile), so the
-# smoke test retries up to 10 times and passes on the first attempt that
-# calls the tool, rather than requiring every single attempt to.
+# correct. It's also slow on GitHub's CPU-only runners: a full run
+# (retrieve -> answer -> verify) can take a couple of minutes. This isn't
+# a bug to fix in the app; it's the tradeoff of using a tiny CI-sized
+# model at all (see docker/ollama-ci/Dockerfile). So the smoke test
+# retries a few times — treating a timeout or a no-tool-call run as a
+# retryable miss — and passes on the first attempt that calls the tool.
 chat_ok=false
-for attempt in $(seq 1 10); do
+for attempt in $(seq 1 6); do
   echo "--- attempt $attempt ---"
-  chat_response=$(curl -fsS --max-time 120 -X POST "http://localhost:$SERVER_PORT/chat" \
+  chat_response=$(curl -fsS --max-time 240 -X POST "http://localhost:$SERVER_PORT/chat" \
     -H "Content-Type: application/json" \
-    -d '{"messages":[{"role":"user","content":"How did the Ulmarin develop technology without fire or metal? Use the retrieve_documents tool to find out."}]}')
+    -d '{"messages":[{"role":"user","content":"How did the Ulmarin develop technology without fire or metal? Use the retrieve_documents tool to find out."}]}' || true)
   echo "$chat_response"
 
   if ! echo "$chat_response" | grep -q 'event: done'; then
-    echo "FAIL: expected the stream to end with a done event, got: $chat_response" >&2
-    exit 1
+    echo "no completed stream on attempt $attempt (timeout or error); retrying"
+    continue
   fi
   if echo "$chat_response" | grep -q 'event: tool_call'; then
     chat_ok=true
@@ -122,7 +124,7 @@ for attempt in $(seq 1 10); do
 done
 
 if ! $chat_ok; then
-  echo "FAIL: expected a tool_call event naming retrieve_documents in at least one of 10 attempts, got none" >&2
+  echo "FAIL: expected a completed stream with a tool_call event naming retrieve_documents in at least one of 6 attempts, got none" >&2
   exit 1
 fi
 
@@ -132,24 +134,26 @@ echo "OK: containerized chat API called retrieve_documents and completed the str
 echo
 echo "== Chat API lore_drop smoke test (serve + real Ollama, qwen3:0.6b) =="
 
-# Same stochastic-tiny-model caveat as the retrieve_documents check above:
-# retry up to 10 times, pass on the first attempt that actually calls
-# lore_drop AND lands a new row in the DB (proving the write + re-ingest
-# round-tripped). The distroless serve image has no shell, so we assert on
-# the DB from out here rather than exec-ing into the container.
+# Same stochastic-tiny-model caveat as the retrieve_documents check above
+# (a timeout or a no-tool-call run is a retryable miss). Passes on the
+# first attempt that calls lore_drop AND lands a new row in the DB
+# (proving the write + re-ingest round-tripped). The distroless serve
+# image has no shell, so we assert on the DB from out here rather than
+# exec-ing into the container. This run also exercises the tool-enabled
+# verification pass, so it gets a longer per-attempt budget.
 docs_before=$(sql_count documents)
 lore_drop_name="99-ci-lore-drop-smoke.md"
 lore_ok=false
-for attempt in $(seq 1 10); do
+for attempt in $(seq 1 6); do
   echo "--- lore_drop attempt $attempt ---"
-  lore_response=$(curl -fsS --max-time 120 -X POST "http://localhost:$SERVER_PORT/chat" \
+  lore_response=$(curl -fsS --max-time 300 -X POST "http://localhost:$SERVER_PORT/chat" \
     -H "Content-Type: application/json" \
-    -d "{\"messages\":[{\"role\":\"user\",\"content\":\"The corpus has nothing about Ulmarin lullabies. Use the lore_drop tool to create $lore_drop_name with a short section inventing some Ulmarin lullaby lore.\"}]}")
+    -d "{\"messages\":[{\"role\":\"user\",\"content\":\"The corpus has nothing about Ulmarin lullabies. Use the lore_drop tool to create $lore_drop_name with a short section inventing some Ulmarin lullaby lore.\"}]}" || true)
   echo "$lore_response"
 
   if ! echo "$lore_response" | grep -q 'event: done'; then
-    echo "FAIL: expected the stream to end with a done event, got: $lore_response" >&2
-    exit 1
+    echo "no completed stream on attempt $attempt (timeout or error); retrying"
+    continue
   fi
   if echo "$lore_response" | grep -q 'event: tool_call' && [ "$(sql_count documents)" -gt "$docs_before" ]; then
     lore_ok=true
@@ -163,7 +167,7 @@ git checkout -- lore_docs 2>/dev/null || true
 rm -f "lore_docs/$lore_drop_name"
 
 if ! $lore_ok; then
-  echo "FAIL: expected lore_drop to add a document row in at least one of 10 attempts, got none" >&2
+  echo "FAIL: expected lore_drop to add a document row in at least one of 6 attempts, got none" >&2
   exit 1
 fi
 

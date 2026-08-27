@@ -181,7 +181,7 @@ func (c *Chatter) runLoop(ctx context.Context, messages []chatMessage, emit func
 		}
 
 		if !sawToolCall {
-			return c.finalize(ctx, messages, draft.Content, emit)
+			return c.finalize(ctx, messages, draft.Content, succeeded[tools.LoreDropName], emit)
 		}
 
 		messages = append(messages, draft)
@@ -242,9 +242,12 @@ func (c *Chatter) streamTurn(ctx context.Context, messages []chatMessage, emit f
 }
 
 // finalize runs the verification pass on a draft answer with no further
-// tool calls, then emits the context-usage and done events.
-func (c *Chatter) finalize(ctx context.Context, messages []chatMessage, draftContent string, emit func(Event) error) error {
-	finalContent, err := c.verify(ctx, messages, draftContent, emit)
+// tool calls, then emits the context-usage and done events. wroteToCorpus
+// says whether a lore_drop succeeded this turn — if so, verify gets the
+// read-only corpus tools to fact-check the write; otherwise it's a cheap
+// single-shot check.
+func (c *Chatter) finalize(ctx context.Context, messages []chatMessage, draftContent string, wroteToCorpus bool, emit func(Event) error) error {
+	finalContent, err := c.verify(ctx, messages, draftContent, wroteToCorpus, emit)
 	if err != nil {
 		return err
 	}

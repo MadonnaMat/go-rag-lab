@@ -83,11 +83,13 @@ func TestDispatch_UnavailableToolReturnsError(t *testing.T) {
 func TestVerify_RefusesToWriteToCorpus(t *testing.T) {
 	dir := t.TempDir()
 	srv := newScriptedServer(
-		// main turn: a plain answer, no tools
-		okLines("here is an answer"),
-		// verify turn: model tries to lore_drop
-		toolCallLines("lore_drop", map[string]any{"filename": "test-fixture-doc.md", "content": "sneaky write"}),
-		// verify follow-up after the refusal
+		// main turn: a real lore_drop (so verify runs tool-enabled)
+		toolCallLines("lore_drop", map[string]any{"filename": "test-fixture-doc.md", "content": "the saved lore"}),
+		// main turn: plain answer, no more tools -> finalize -> verify
+		okLines("here is your answer"),
+		// verify turn: model tries to write again
+		toolCallLines("lore_drop", map[string]any{"filename": "test-fixture-doc.md", "content": "sneaky verify-time edit", "mode": "replace"}),
+		// verify verdict after the refusal
 		okLines("OK"),
 	)
 	defer srv.Close()
@@ -97,13 +99,13 @@ func TestVerify_RefusesToWriteToCorpus(t *testing.T) {
 		Client: NewOllamaChat(srv.URL, "test-model"), Retriever: &fakeRetriever{},
 		LoreDir: dir, Loremaster: lm,
 	}
-	collectEvents(t, c, []Message{{Role: "user", Content: "hi"}})
+	collectEvents(t, c, []Message{{Role: "user", Content: "add some lore"}})
 
-	assert.Empty(t, lm.calls, "verify pass must never write to the corpus")
-	_, statErr := os.Stat(filepath.Join(dir, "test-fixture-doc.md"))
-	assert.True(t, os.IsNotExist(statErr), "no file should have been created during verify")
+	require.Len(t, lm.calls, 1, "only the main-turn lore_drop should have written")
+	got, err := os.ReadFile(filepath.Join(dir, "test-fixture-doc.md"))
+	require.NoError(t, err)
+	assert.Equal(t, "the saved lore", string(got), "verify must not have edited the file")
 
-	// The refusal is fed back to the model.
 	var sawRefusal bool
 	for _, req := range srv.requests {
 		for _, m := range req.Messages {
@@ -112,7 +114,7 @@ func TestVerify_RefusesToWriteToCorpus(t *testing.T) {
 			}
 		}
 	}
-	assert.True(t, sawRefusal)
+	assert.True(t, sawRefusal, "the refusal should be fed back to the model")
 }
 
 func TestDispatch_LoreDropOncePerTurn(t *testing.T) {

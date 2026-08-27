@@ -18,10 +18,15 @@ import (
 // one lock for all files is fine.
 var loreDropMu sync.Mutex
 
+// LoreDropName is the lore_drop tool's function name — exported because
+// internal/chat special-cases it (the tool-enabled verification pass only
+// runs after a lore_drop, to fact-check the write).
+const LoreDropName = "lore_drop"
+
 // loreDrop writes ulmarin lore into the corpus and re-ingests it.
 type loreDrop struct{}
 
-func (loreDrop) Name() string      { return "lore_drop" }
+func (loreDrop) Name() string      { return LoreDropName }
 func (loreDrop) Writes() bool      { return true }
 func (loreDrop) OncePerTurn() bool { return true }
 func (loreDrop) Available(d Deps) bool {
@@ -31,7 +36,7 @@ func (loreDrop) Available(d Deps) bool {
 func (loreDrop) Def() Def {
 	var d Def
 	d.Type = "function"
-	d.Function.Name = "lore_drop"
+	d.Function.Name = LoreDropName
 	d.Function.Description = "Write ulmarin lore into the corpus and immediately re-ingest it so future searches find it. Use ONLY when retrieve_documents confirms the corpus cannot answer a question about the ulmarin. To ADD to an existing document, pass its filename, mode \"append\", and content = ONLY the new Markdown section (the tool keeps the existing text — you do NOT need get_resource first). To create a new topic, pass a new filename like \"06-ulmarin-cuisine.md\" (mode is ignored). Use mode \"replace\" only to rewrite a whole document, passing its COMPLETE new body."
 	d.Function.Parameters = map[string]any{
 		"type": "object",

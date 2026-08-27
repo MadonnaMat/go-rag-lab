@@ -10,17 +10,17 @@ import (
 
 // verifyMaxIterations bounds the verify tool-call loop, like
 // MaxToolIterations does for the main loop.
-const verifyMaxIterations = 3
+const verifyMaxIterations = 2
 
-// verify emits EventVerifying, then runs a short bounded tool-call loop
-// asking the model to check its own draft — it may call the read-only
-// corpus tools to do so (emitting the usual EventToolCall/EventToolResult
-// as it goes). If the final response is "OK" (case-insensitive, trimmed),
-// draftContent is returned unchanged. Otherwise the response is treated as
-// a corrected final answer and EventRevised is emitted. A verify call
-// error is non-fatal — falls back to the original draft rather than
-// failing the whole request.
-func (c *Chatter) verify(ctx context.Context, messages []chatMessage, draftContent string, emit func(Event) error) (string, error) {
+// verify emits EventVerifying, then asks the model to check its own draft.
+// When wroteToCorpus is set (a lore_drop ran this turn), it's a short
+// bounded tool-call loop so the model can get_resource the file it claims
+// to have written; otherwise it's a single tool-free call — the common,
+// cheap path. If the final response is "OK" (case-insensitive, trimmed),
+// draftContent is returned unchanged; otherwise the response is a
+// corrected final answer and EventRevised is emitted. A verify call error
+// is non-fatal — falls back to the original draft.
+func (c *Chatter) verify(ctx context.Context, messages []chatMessage, draftContent string, wroteToCorpus bool, emit func(Event) error) (string, error) {
 	if err := emit(Event{Type: EventVerifying}); err != nil {
 		return "", err
 	}
@@ -29,8 +29,16 @@ func (c *Chatter) verify(ctx context.Context, messages []chatMessage, draftConte
 		Role:    "user",
 		Content: fmt.Sprintf(prompts.Verify, draftContent),
 	})
-	succeeded := map[string]bool{}
 
+	if !wroteToCorpus {
+		response, err := c.Client.chatOnce(ctx, msgs)
+		if err != nil {
+			return draftContent, nil
+		}
+		return c.applyVerifyVerdict(draftContent, response, emit)
+	}
+
+	succeeded := map[string]bool{}
 	for iteration := 0; iteration < verifyMaxIterations; iteration++ {
 		draft, sawToolCall, err := c.verifyTurn(ctx, msgs)
 		if err != nil {

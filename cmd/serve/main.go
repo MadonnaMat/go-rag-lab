@@ -84,10 +84,11 @@ func run(addrFlag string) error {
 		Retriever:    retriever,
 		DefaultTopK:  cfg.TopK,
 		SystemPrompt: prompts.System,
-		// A lore_drop answer legitimately chains retrieve_documents ->
-		// get_resource -> lore_drop -> final answer, so give the loop more
-		// than the bare retrieve-then-answer headroom.
-		MaxToolIterations: 6,
+		// A lore_drop answer chains retrieve_documents -> lore_drop -> final
+		// answer, a step past the bare retrieve-then-answer path — 5 leaves
+		// headroom for a stray extra tool call without letting a weak model
+		// loop indefinitely.
+		MaxToolIterations: 5,
 		ContextTokens:     contextTokens,
 		Summaries:         s,
 		Docs:              s,
