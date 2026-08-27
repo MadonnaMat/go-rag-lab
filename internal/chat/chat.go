@@ -85,10 +85,10 @@ const (
 
 // Event is what Run emits as the conversation progresses.
 type Event struct {
-	Type          EventType
-	ToolName      string
-	ToolArgs      map[string]any
-	ToolResult    []toolResultChunk
+	Type       EventType
+	ToolName   string
+	ToolArgs   map[string]any
+	ToolResult []toolResultChunk
 	// ToolSummary is a human-readable one-liner describing a non-retrieval
 	// tool's result (list_resources / get_resource / lore_drop) for the UI
 	// status line — retrieval uses ToolResult instead.

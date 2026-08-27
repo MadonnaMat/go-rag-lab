@@ -148,3 +148,22 @@ func TestHandleChat_RealTCPStreaming(t *testing.T) {
 	assert.Contains(t, out, "event: token")
 	assert.Contains(t, out, "event: done")
 }
+
+func TestHandleChat_ToolResultSummaryFrame(t *testing.T) {
+	chatter := &fakeChatter{events: []chat.Event{
+		{Type: chat.EventToolCall, ToolName: "lore_drop", ToolArgs: map[string]any{"filename": "06-ulmarin-cuisine.md"}},
+		{Type: chat.EventToolResult, ToolSummary: "Created & re-ingested 06-ulmarin-cuisine.md (2 chunk(s))"},
+		{Type: chat.EventDone},
+	}}
+	router := NewRouter(&Handler{Chatter: chatter})
+
+	req := httptest.NewRequest(http.MethodPost, "/chat", strings.NewReader(`{"messages":[{"role":"user","content":"hi"}]}`))
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	out := rec.Body.String()
+	assert.Contains(t, out, "event: tool_result")
+	assert.Contains(t, out, `"message":`)
+	assert.Contains(t, out, `re-ingested 06-ulmarin-cuisine.md (2 chunk(s))`)
+}

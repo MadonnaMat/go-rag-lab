@@ -274,3 +274,29 @@ func (erroringProvider) Embed(ctx context.Context, texts []string) ([][]float32,
 }
 
 var errEmbedFailed = errors.New("embedding backend unavailable")
+
+func TestIngestFile(t *testing.T) {
+	provider := &fakeProvider{}
+	st := newFakeStore()
+	st.dirHash = "stale-hash" // a prior IngestDir run left this
+
+	ing := &Ingester{Store: st, Provider: provider, ChunkSize: 8, ChunkOverlap: 2}
+
+	n, err := ing.IngestFile(context.Background(), "06-ulmarin-cuisine.md", []byte("The ulmarin eat moss and lichen."))
+	require.NoError(t, err)
+	assert.Positive(t, n)
+
+	// Document upserted under its bare filename.
+	id, ok := st.documents["06-ulmarin-cuisine.md"]
+	require.True(t, ok)
+	assert.Len(t, st.chunksByDoc[id], n)
+
+	// Dir hash cleared so the next IngestDir does a full re-ingest.
+	assert.Empty(t, st.dirHash)
+
+	// Re-running with new content replaces chunks under the same id.
+	n2, err := ing.IngestFile(context.Background(), "06-ulmarin-cuisine.md", []byte("Revised."))
+	require.NoError(t, err)
+	assert.Equal(t, id, st.documents["06-ulmarin-cuisine.md"])
+	assert.Len(t, st.chunksByDoc[id], n2)
+}
