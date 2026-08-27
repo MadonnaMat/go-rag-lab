@@ -128,3 +128,44 @@ fi
 
 echo
 echo "OK: containerized chat API called retrieve_documents and completed the stream"
+
+echo
+echo "== Chat API lore_drop smoke test (serve + real Ollama, qwen3:0.6b) =="
+
+# Same stochastic-tiny-model caveat as the retrieve_documents check above:
+# retry up to 10 times, pass on the first attempt that actually calls
+# lore_drop AND lands a new row in the DB (proving the write + re-ingest
+# round-tripped). The distroless serve image has no shell, so we assert on
+# the DB from out here rather than exec-ing into the container.
+docs_before=$(sql_count documents)
+lore_drop_name="99-ci-lore-drop-smoke.md"
+lore_ok=false
+for attempt in $(seq 1 10); do
+  echo "--- lore_drop attempt $attempt ---"
+  lore_response=$(curl -fsS --max-time 120 -X POST "http://localhost:$SERVER_PORT/chat" \
+    -H "Content-Type: application/json" \
+    -d "{\"messages\":[{\"role\":\"user\",\"content\":\"The corpus has nothing about Ulmarin lullabies. Use the lore_drop tool to create $lore_drop_name with a short section inventing some Ulmarin lullaby lore.\"}]}")
+  echo "$lore_response"
+
+  if ! echo "$lore_response" | grep -q 'event: done'; then
+    echo "FAIL: expected the stream to end with a done event, got: $lore_response" >&2
+    exit 1
+  fi
+  if echo "$lore_response" | grep -q 'event: tool_call' && [ "$(sql_count documents)" -gt "$docs_before" ]; then
+    lore_ok=true
+    break
+  fi
+  echo "no lore_drop round-trip on attempt $attempt; retrying"
+done
+
+# Don't leave the invented doc in the working tree regardless of outcome.
+git checkout -- lore_docs 2>/dev/null || true
+rm -f "lore_docs/$lore_drop_name"
+
+if ! $lore_ok; then
+  echo "FAIL: expected lore_drop to add a document row in at least one of 10 attempts, got none" >&2
+  exit 1
+fi
+
+echo
+echo "OK: containerized chat API wrote new lore and re-ingested it"
