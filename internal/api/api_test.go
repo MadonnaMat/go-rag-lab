@@ -18,15 +18,17 @@ import (
 // results/error, so tests never need a real Retriever or Postgres.
 type fakeRetriever struct {
 	gotQuery string
+	gotMode  store.SearchMode
 	gotTopK  int
 	called   bool
 	results  []store.SearchResult
 	err      error
 }
 
-func (f *fakeRetriever) Query(ctx context.Context, q string, topK int) ([]store.SearchResult, error) {
+func (f *fakeRetriever) Query(ctx context.Context, q string, mode store.SearchMode, topK int) ([]store.SearchResult, error) {
 	f.called = true
 	f.gotQuery = q
+	f.gotMode = mode
 	f.gotTopK = topK
 	if f.err != nil {
 		return nil, f.err
@@ -43,15 +45,34 @@ func TestHandleQuery(t *testing.T) {
 		wantBodyContains string
 		wantCalled       bool
 		wantTopK         int
+		wantMode         store.SearchMode
 	}{
 		{
 			name:             "happy path",
 			query:            url.Values{"query": {"how does X work"}, "top_k": {"2"}},
-			retriever:        &fakeRetriever{results: []store.SearchResult{{Source: "a.md", Content: "hello", Distance: 0.1}}},
+			retriever:        &fakeRetriever{results: []store.SearchResult{{Source: "a.md", ChunkIndex: 2, Content: "hello", Distance: 0.1}}},
 			wantStatus:       http.StatusOK,
-			wantBodyContains: `"source":"a.md"`,
+			wantBodyContains: `"chunk_index":2`,
 			wantCalled:       true,
 			wantTopK:         2,
+		},
+		{
+			name:             "explicit keyword mode is forwarded",
+			query:            url.Values{"query": {"quetzalcoatlus"}, "mode": {"keyword"}},
+			retriever:        &fakeRetriever{},
+			wantStatus:       http.StatusOK,
+			wantBodyContains: `"results":[]`,
+			wantCalled:       true,
+			wantTopK:         5,
+			wantMode:         store.SearchKeyword,
+		},
+		{
+			name:             "unknown mode is rejected before calling the retriever",
+			query:            url.Values{"query": {"q"}, "mode": {"fuzzy"}},
+			retriever:        &fakeRetriever{},
+			wantStatus:       http.StatusBadRequest,
+			wantBodyContains: "mode must be auto, vector, or keyword",
+			wantCalled:       false,
 		},
 		{
 			name:             "empty query is rejected before calling the retriever",
@@ -112,6 +133,7 @@ func TestHandleQuery(t *testing.T) {
 			assert.Equal(t, tt.wantCalled, tt.retriever.called)
 			if tt.wantCalled {
 				assert.Equal(t, tt.wantTopK, tt.retriever.gotTopK)
+				assert.Equal(t, tt.wantMode, tt.retriever.gotMode)
 			}
 		})
 	}

@@ -51,9 +51,10 @@ type Result struct {
 
 // RetrievedChunk is the model-facing JSON shape of one retrieval hit.
 type RetrievedChunk struct {
-	Source   string  `json:"source"`
-	Content  string  `json:"content"`
-	Distance float64 `json:"distance"`
+	Source     string  `json:"source"`
+	ChunkIndex int     `json:"chunk_index"`
+	Content    string  `json:"content"`
+	Distance   float64 `json:"distance"`
 }
 
 // errResult builds a failure Result.
@@ -66,9 +67,10 @@ func jsonResult(summary string, v any) Result {
 	return Result{Content: string(b), Summary: summary, Payload: b}
 }
 
-// Retriever embeds a query and returns the nearest chunks.
+// Retriever embeds a query and returns the best-matching chunks, using the
+// given search mode (see store.SearchMode; "" means auto).
 type Retriever interface {
-	Query(ctx context.Context, q string, topK int) ([]store.SearchResult, error)
+	Query(ctx context.Context, q string, mode store.SearchMode, topK int) ([]store.SearchResult, error)
 }
 
 // DocLister lists every ingested document.

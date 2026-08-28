@@ -7,7 +7,8 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"strings"
+
+	"github.com/MadonnaMat/go-rag-lab/internal/lore"
 )
 
 // getResource returns the full Markdown text of one ingested document.
@@ -36,26 +37,9 @@ func (getResource) Def() Def {
 	return d
 }
 
-// safeLoreName validates a model-supplied filename: it must be a bare
-// ".md" base name with no directory component, so a tool can only touch
-// files directly inside LoreDir.
-func safeLoreName(name string) (string, error) {
-	name = strings.TrimSpace(name)
-	if name == "" {
-		return "", errors.New("missing required argument \"name\"")
-	}
-	if name != filepath.Base(name) || strings.Contains(name, "/") || strings.Contains(name, `\`) {
-		return "", fmt.Errorf("invalid resource name %q: must be a bare filename", name)
-	}
-	if filepath.Ext(name) != ".md" {
-		return "", fmt.Errorf("invalid resource name %q: must end in .md", name)
-	}
-	return name, nil
-}
-
 func (getResource) Run(_ context.Context, call Call, deps Deps) Result {
 	name, _ := call.Args["name"].(string)
-	base, err := safeLoreName(name)
+	base, err := lore.SafeName(name)
 	if err != nil {
 		return errResult(err)
 	}

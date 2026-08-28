@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/MadonnaMat/go-rag-lab/internal/chat/tools"
+	"github.com/MadonnaMat/go-rag-lab/internal/store"
 )
 
 // The capability interfaces the tools need are defined in internal/chat/tools;
@@ -74,9 +75,18 @@ const (
 	EventVerifying
 	EventRevised
 	EventContextUsage
+	EventSources // the documents the final answer drew on
 	EventDone
 	EventError
 )
+
+// SourceRef names one document the answer drew on, plus the indices of the
+// retrieved chunks from it — enough for a client to fetch the doc and
+// highlight the exact passages (see internal/api's /lore endpoint).
+type SourceRef struct {
+	File         string
+	ChunkIndices []int
+}
 
 // Event is what Run emits as the conversation progresses.
 type Event struct {
@@ -97,7 +107,9 @@ type Event struct {
 	Revised       string
 	UsedTokens    int
 	ContextTokens int
-	Err           error
+	// Sources is set on EventSources: the documents the final answer drew on.
+	Sources []SourceRef
+	Err     error
 }
 
 const compactCommand = "/compact"
@@ -171,6 +183,9 @@ func (c *Chatter) runLoop(ctx context.Context, messages []chatMessage, emit func
 	// Tracks once-per-turn tools (lore_drop) that have already run, across
 	// every iteration of this one Run.
 	succeeded := map[string]bool{}
+	// Every chunk retrieved this turn, so finalize can name the sources the
+	// answer drew on.
+	var retrieved []store.SearchResult
 
 	for iteration := 0; iteration < maxIterations; iteration++ {
 		messages = c.maybeCompact(ctx, messages, emit)
@@ -181,11 +196,11 @@ func (c *Chatter) runLoop(ctx context.Context, messages []chatMessage, emit func
 		}
 
 		if !sawToolCall {
-			return c.finalize(ctx, messages, draft.Content, succeeded[tools.LoreDropName], emit)
+			return c.finalize(ctx, messages, draft.Content, succeeded[tools.LoreDropName], retrieved, emit)
 		}
 
 		messages = append(messages, draft)
-		toolMessages, err := c.executeToolCalls(ctx, draft.ToolCalls, succeeded, false, emit)
+		toolMessages, err := c.executeToolCalls(ctx, draft.ToolCalls, succeeded, false, &retrieved, emit)
 		if err != nil {
 			return c.emitFatal(emit, err)
 		}
@@ -246,12 +261,19 @@ func (c *Chatter) streamTurn(ctx context.Context, messages []chatMessage, emit f
 // says whether a lore_drop succeeded this turn — if so, verify gets the
 // read-only corpus tools to fact-check the write; otherwise it's a cheap
 // single-shot check.
-func (c *Chatter) finalize(ctx context.Context, messages []chatMessage, draftContent string, wroteToCorpus bool, emit func(Event) error) error {
+func (c *Chatter) finalize(ctx context.Context, messages []chatMessage, draftContent string, wroteToCorpus bool, retrieved []store.SearchResult, emit func(Event) error) error {
 	finalContent, err := c.verify(ctx, messages, draftContent, wroteToCorpus, emit)
 	if err != nil {
 		return err
 	}
 	messages = append(messages, chatMessage{Role: "assistant", Content: finalContent})
+
+	if sources := answerSources(finalContent, retrieved); len(sources) > 0 {
+		if err := emit(Event{Type: EventSources, Sources: sources}); err != nil {
+			return err
+		}
+	}
+
 	if err := emit(Event{Type: EventContextUsage, UsedTokens: estimateTokens(messages), ContextTokens: c.ContextTokens}); err != nil {
 		return err
 	}

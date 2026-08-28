@@ -168,3 +168,23 @@ func TestHandleChat_ToolResultSummaryFrame(t *testing.T) {
 	assert.Contains(t, out, `re-ingested test-fixture-doc.md (2 chunk(s))`)
 	assert.Contains(t, out, `"payload":[{"name":"a.md","chunks":3}]`)
 }
+
+func TestHandleChat_SourcesFrame(t *testing.T) {
+	chatter := &fakeChatter{events: []chat.Event{
+		{Type: chat.EventSources, Sources: []chat.SourceRef{
+			{File: "03-diet.md", ChunkIndices: []int{1, 4}},
+		}},
+		{Type: chat.EventDone},
+	}}
+	router := NewRouter(&Handler{Chatter: chatter})
+
+	req := httptest.NewRequest(http.MethodPost, "/chat", strings.NewReader(`{"messages":[{"role":"user","content":"hi"}]}`))
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	out := rec.Body.String()
+	assert.Contains(t, out, "event: sources")
+	assert.Contains(t, out, `"file":"03-diet.md"`)
+	assert.Contains(t, out, `"chunk_indices":[1,4]`)
+}

@@ -96,7 +96,14 @@ func run(addrFlag string) error {
 		LoreDir:           cfg.LoreDir,
 	}
 
-	handler := api.NewRouter(&api.Handler{Retriever: retriever, Chatter: chatter, DefaultTopK: cfg.TopK})
+	handler := api.NewRouter(&api.Handler{
+		Retriever:    retriever,
+		Chatter:      chatter,
+		DefaultTopK:  cfg.TopK,
+		LoreDir:      cfg.LoreDir,
+		ChunkSize:    cfg.ChunkSize,
+		ChunkOverlap: cfg.ChunkOverlap,
+	})
 
 	log.Printf("listening on %s", addr)
 	return http.ListenAndServe(addr, handler)

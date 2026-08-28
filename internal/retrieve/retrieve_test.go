@@ -34,13 +34,17 @@ func (f *fakeProvider) Embed(ctx context.Context, texts []string) ([][]float32, 
 // fixed set of results — no real Postgres involved.
 type fakeStore struct {
 	gotEmbedding []float32
+	gotText      string
+	gotMode      store.SearchMode
 	gotTopK      int
 	results      []store.SearchResult
 	err          error
 }
 
-func (f *fakeStore) SearchChunks(ctx context.Context, queryEmbedding []float32, topK int) ([]store.SearchResult, error) {
+func (f *fakeStore) SearchChunks(ctx context.Context, queryEmbedding []float32, queryText string, mode store.SearchMode, topK int) ([]store.SearchResult, error) {
 	f.gotEmbedding = queryEmbedding
+	f.gotText = queryText
+	f.gotMode = mode
 	f.gotTopK = topK
 	if f.err != nil {
 		return nil, f.err
@@ -54,7 +58,7 @@ func TestQuery_EmbedsAndSearches(t *testing.T) {
 	st := &fakeStore{results: want}
 	r := &Retriever{Store: st, Provider: provider}
 
-	got, err := r.Query(context.Background(), "how does X work", 3)
+	got, err := r.Query(context.Background(), "how does X work", store.SearchKeyword, 3)
 	require.NoError(t, err)
 	assert.Equal(t, want, got)
 
@@ -63,13 +67,15 @@ func TestQuery_EmbedsAndSearches(t *testing.T) {
 
 	assert.Equal(t, []float32{0}, st.gotEmbedding, "the embedding returned by the provider should be passed straight through to SearchChunks")
 	assert.Equal(t, 3, st.gotTopK)
+	assert.Equal(t, "how does X work", st.gotText, "the raw query text drives the full-text side and must reach the store")
+	assert.Equal(t, store.SearchKeyword, st.gotMode, "the search mode should be forwarded unchanged")
 }
 
 func TestQuery_RejectsEmptyQuery(t *testing.T) {
 	provider := &fakeProvider{}
 	r := &Retriever{Store: &fakeStore{}, Provider: provider}
 
-	_, err := r.Query(context.Background(), "", 3)
+	_, err := r.Query(context.Background(), "", store.SearchAuto, 3)
 	require.Error(t, err)
 	assert.Empty(t, provider.calls, "an empty query should be rejected before ever calling the embedding provider")
 }
@@ -78,7 +84,7 @@ func TestQuery_RejectsNonPositiveTopK(t *testing.T) {
 	provider := &fakeProvider{}
 	r := &Retriever{Store: &fakeStore{}, Provider: provider}
 
-	_, err := r.Query(context.Background(), "a query", 0)
+	_, err := r.Query(context.Background(), "a query", store.SearchAuto, 0)
 	require.Error(t, err)
 	assert.Empty(t, provider.calls, "a non-positive topK should be rejected before ever calling the embedding provider")
 }
@@ -87,7 +93,7 @@ func TestQuery_PropagatesProviderError(t *testing.T) {
 	errEmbedFailed := errors.New("embedding backend unavailable")
 	r := &Retriever{Store: &fakeStore{}, Provider: &fakeProvider{err: errEmbedFailed}}
 
-	_, err := r.Query(context.Background(), "a query", 3)
+	_, err := r.Query(context.Background(), "a query", store.SearchAuto, 3)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, errEmbedFailed)
 }
@@ -96,7 +102,7 @@ func TestQuery_PropagatesStoreError(t *testing.T) {
 	errSearchFailed := errors.New("database unavailable")
 	r := &Retriever{Store: &fakeStore{err: errSearchFailed}, Provider: &fakeProvider{}}
 
-	_, err := r.Query(context.Background(), "a query", 3)
+	_, err := r.Query(context.Background(), "a query", store.SearchAuto, 3)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, errSearchFailed)
 }

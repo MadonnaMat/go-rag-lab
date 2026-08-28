@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+
+	"github.com/MadonnaMat/go-rag-lab/internal/lore"
 )
 
 // loreDropMu serializes lore_drop's read-modify-write-then-reingest cycle.
@@ -77,7 +79,7 @@ func (loreDrop) Run(ctx context.Context, call Call, deps Deps) Result {
 	content, _ := call.Args["content"].(string)
 	mode, _ := call.Args["mode"].(string)
 
-	base, err := safeLoreName(filename)
+	base, err := lore.SafeName(filename)
 	if err != nil {
 		return errResult(err)
 	}

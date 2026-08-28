@@ -129,16 +129,43 @@ func TestSearchChunks_OrdersByDistanceAndLimitsToTopK(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	results, err := s.SearchChunks(ctx, vec768(0), 2)
+	results, err := s.SearchChunks(ctx, vec768(0), "irrelevant text", SearchVector, 2)
 	require.NoError(t, err)
 	require.Len(t, results, 2, "topK=2 should limit to 2 results even though 3 chunks exist for this document")
 
 	assert.Equal(t, "exact match", results[0].Content)
 	assert.Equal(t, path, results[0].Source)
+	assert.Equal(t, 1, results[0].ChunkIndex)
 	assert.InDelta(t, 0, results[0].Distance, 1e-6)
 
 	assert.Equal(t, "partial match", results[1].Content)
 	assert.Greater(t, results[1].Distance, results[0].Distance, "a partial match should be farther than an exact one")
+}
+
+func TestSearchChunks_KeywordAndAutoFindExactTerms(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+	const path = "store_test.go::search_fts"
+	cleanupDocument(t, s, path)
+
+	docID, err := s.UpsertDocument(ctx, path, "hash-1")
+	require.NoError(t, err)
+
+	// Every embedding is identical, so the vector side can't distinguish
+	// these chunks — only full-text search can pick out the rare term.
+	err = s.ReplaceChunks(ctx, docID, []Chunk{
+		{Index: 0, Content: "the weather is mild today", Embedding: vec768(0)},
+		{Index: 1, Content: "a lone quetzalcoatlus soared overhead", Embedding: vec768(0)},
+		{Index: 2, Content: "nothing unusual happened at all", Embedding: vec768(0)},
+	})
+	require.NoError(t, err)
+
+	for _, mode := range []SearchMode{SearchKeyword, SearchAuto} {
+		results, err := s.SearchChunks(ctx, vec768(0), "quetzalcoatlus", mode, 1)
+		require.NoError(t, err, mode)
+		require.Len(t, results, 1, mode)
+		assert.Equal(t, 1, results[0].ChunkIndex, "%s should surface the chunk containing the exact term", mode)
+	}
 }
 
 func TestIngestDirHash_RoundTrip(t *testing.T) {

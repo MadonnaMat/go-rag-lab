@@ -62,7 +62,7 @@ type fakeRetriever struct {
 	calls   []string
 }
 
-func (f *fakeRetriever) Query(ctx context.Context, q string, topK int) ([]store.SearchResult, error) {
+func (f *fakeRetriever) Query(ctx context.Context, q string, mode store.SearchMode, topK int) ([]store.SearchResult, error) {
 	f.calls = append(f.calls, q)
 	if f.err != nil {
 		return nil, f.err
