@@ -6,3 +6,6 @@
 # "API docs" section. Pure build output, never hand-edited, so it isn't
 # committed.
 /docs/
+
+# Playwright MCP scratch output
+.playwright-mcp/

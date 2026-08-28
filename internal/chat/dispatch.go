@@ -11,15 +11,17 @@ import (
 // toolResultChunk is the retrieval payload carried on an EventToolResult
 // to the SSE layer, mirroring store.SearchResult.
 type toolResultChunk struct {
-	Source   string  `json:"source"`
-	Content  string  `json:"content"`
-	Distance float64 `json:"distance"`
+	Source     string  `json:"source"`
+	ChunkIndex int     `json:"chunk_index"`
+	Content    string  `json:"content"`
+	Distance   float64 `json:"distance"`
+	Score      float64 `json:"score"`
 }
 
 func toResultChunks(results []store.SearchResult) []toolResultChunk {
 	out := make([]toolResultChunk, len(results))
 	for i, r := range results {
-		out[i] = toolResultChunk{Source: r.Source, Content: r.Content, Distance: r.Distance}
+		out[i] = toolResultChunk{Source: r.Source, ChunkIndex: r.ChunkIndex, Content: r.Content, Distance: r.Distance, Score: r.Score}
 	}
 	return out
 }
@@ -57,7 +59,10 @@ func (c *Chatter) toolDefs(readOnly bool) []tools.Def {
 // so a repeat call is refused rather than executed. When readOnly is set
 // (the verification pass), any tool that writes to the corpus is refused
 // outright — not merely left unadvertised.
-func (c *Chatter) executeToolCalls(ctx context.Context, calls []toolCall, succeeded map[string]bool, readOnly bool, emit func(Event) error) ([]chatMessage, error) {
+// retrieved, when non-nil, accumulates every chunk returned by a retrieval
+// tool call — the caller (runLoop) uses it to work out which sources
+// informed the final answer. The verify pass passes nil.
+func (c *Chatter) executeToolCalls(ctx context.Context, calls []toolCall, succeeded map[string]bool, readOnly bool, retrieved *[]store.SearchResult, emit func(Event) error) ([]chatMessage, error) {
 	deps := c.toolDeps()
 	out := make([]chatMessage, 0, len(calls))
 	for _, wire := range calls {
@@ -68,6 +73,9 @@ func (c *Chatter) executeToolCalls(ctx context.Context, calls []toolCall, succee
 		}
 
 		res := runTool(ctx, deps, call, succeeded, readOnly)
+		if retrieved != nil && res.Err == nil && len(res.Chunks) > 0 {
+			*retrieved = append(*retrieved, res.Chunks...)
+		}
 		msg, err := c.emitToolResult(call, res, emit)
 		if err != nil {
 			return nil, err

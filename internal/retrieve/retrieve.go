@@ -18,7 +18,7 @@ import (
 // fake, in-memory implementation with no real Postgres involved — same
 // reasoning as ingest.Store.
 type Store interface {
-	SearchChunks(ctx context.Context, queryEmbedding []float32, topK int) ([]store.SearchResult, error)
+	SearchChunks(ctx context.Context, queryEmbedding []float32, queryText string, mode store.SearchMode, topK int) ([]store.SearchResult, error)
 }
 
 type Retriever struct {
@@ -27,8 +27,9 @@ type Retriever struct {
 }
 
 // Query embeds q with the same provider/model used at ingestion time, then
-// returns the topK nearest chunks, nearest first.
-func (r *Retriever) Query(ctx context.Context, q string, topK int) ([]store.SearchResult, error) {
+// returns the topK best-matching chunks, best first. mode selects the
+// ranking strategy (see store.SearchMode); an empty mode means store.SearchAuto.
+func (r *Retriever) Query(ctx context.Context, q string, mode store.SearchMode, topK int) ([]store.SearchResult, error) {
 	if q == "" {
 		return nil, fmt.Errorf("query must not be empty")
 	}
@@ -44,7 +45,7 @@ func (r *Retriever) Query(ctx context.Context, q string, topK int) ([]store.Sear
 		return nil, fmt.Errorf("embedding provider returned %d vectors for 1 query", len(embeddings))
 	}
 
-	results, err := r.Store.SearchChunks(ctx, embeddings[0], topK)
+	results, err := r.Store.SearchChunks(ctx, embeddings[0], q, mode, topK)
 	if err != nil {
 		return nil, fmt.Errorf("search chunks: %w", err)
 	}

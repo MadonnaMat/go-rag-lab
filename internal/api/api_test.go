@@ -18,15 +18,17 @@ import (
 // results/error, so tests never need a real Retriever or Postgres.
 type fakeRetriever struct {
 	gotQuery string
+	gotMode  store.SearchMode
 	gotTopK  int
 	called   bool
 	results  []store.SearchResult
 	err      error
 }
 
-func (f *fakeRetriever) Query(ctx context.Context, q string, topK int) ([]store.SearchResult, error) {
+func (f *fakeRetriever) Query(ctx context.Context, q string, mode store.SearchMode, topK int) ([]store.SearchResult, error) {
 	f.called = true
 	f.gotQuery = q
+	f.gotMode = mode
 	f.gotTopK = topK
 	if f.err != nil {
 		return nil, f.err
@@ -45,11 +47,11 @@ func TestHandleQuery(t *testing.T) {
 		wantTopK         int
 	}{
 		{
-			name:             "happy path",
+			name:             "happy path exposes chunk_index and score",
 			query:            url.Values{"query": {"how does X work"}, "top_k": {"2"}},
-			retriever:        &fakeRetriever{results: []store.SearchResult{{Source: "a.md", Content: "hello", Distance: 0.1}}},
+			retriever:        &fakeRetriever{results: []store.SearchResult{{Source: "a.md", ChunkIndex: 2, Content: "hello", Distance: 0, Score: 0.42}}},
 			wantStatus:       http.StatusOK,
-			wantBodyContains: `"source":"a.md"`,
+			wantBodyContains: `"chunk_index":2,"content":"hello","distance":0,"score":0.42`,
 			wantCalled:       true,
 			wantTopK:         2,
 		},
@@ -115,6 +117,31 @@ func TestHandleQuery(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestHandleQuery_Mode(t *testing.T) {
+	t.Run("explicit mode is forwarded to the retriever", func(t *testing.T) {
+		fr := &fakeRetriever{}
+		router := NewRouter(&Handler{Retriever: fr, DefaultTopK: 5})
+		req := httptest.NewRequest(http.MethodGet, "/query?query=quetzalcoatlus&mode=keyword", nil)
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+
+		require.Equal(t, http.StatusOK, rec.Code)
+		assert.Equal(t, store.SearchKeyword, fr.gotMode)
+	})
+
+	t.Run("unknown mode is rejected before the retriever is called", func(t *testing.T) {
+		fr := &fakeRetriever{}
+		router := NewRouter(&Handler{Retriever: fr, DefaultTopK: 5})
+		req := httptest.NewRequest(http.MethodGet, "/query?query=q&mode=fuzzy", nil)
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+
+		assert.Equal(t, http.StatusBadRequest, rec.Code)
+		assert.Contains(t, rec.Body.String(), "mode must be auto, vector, or keyword")
+		assert.False(t, fr.called)
+	})
 }
 
 func TestHandleHealthz(t *testing.T) {

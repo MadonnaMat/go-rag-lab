@@ -129,16 +129,78 @@ func TestSearchChunks_OrdersByDistanceAndLimitsToTopK(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	results, err := s.SearchChunks(ctx, vec768(0), 2)
+	results, err := s.SearchChunks(ctx, vec768(0), "irrelevant text", SearchVector, 2)
 	require.NoError(t, err)
 	require.Len(t, results, 2, "topK=2 should limit to 2 results even though 3 chunks exist for this document")
 
 	assert.Equal(t, "exact match", results[0].Content)
 	assert.Equal(t, path, results[0].Source)
+	assert.Equal(t, 1, results[0].ChunkIndex)
 	assert.InDelta(t, 0, results[0].Distance, 1e-6)
 
 	assert.Equal(t, "partial match", results[1].Content)
 	assert.Greater(t, results[1].Distance, results[0].Distance, "a partial match should be farther than an exact one")
+}
+
+func TestSearchChunks_KeywordAndAutoFindExactTerms(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+	const path = "store_test.go::search_fts"
+	cleanupDocument(t, s, path)
+
+	docID, err := s.UpsertDocument(ctx, path, "hash-1")
+	require.NoError(t, err)
+
+	// Every embedding is identical, so the vector side can't distinguish
+	// these chunks — only full-text search can pick out the rare term.
+	err = s.ReplaceChunks(ctx, docID, []Chunk{
+		{Index: 0, Content: "the weather is mild today", Embedding: vec768(0)},
+		{Index: 1, Content: "a lone quetzalcoatlus soared overhead", Embedding: vec768(0)},
+		{Index: 2, Content: "nothing unusual happened at all", Embedding: vec768(0)},
+	})
+	require.NoError(t, err)
+
+	t.Run("keyword returns exactly the matching chunk", func(t *testing.T) {
+		results, err := s.SearchChunks(ctx, vec768(0), "quetzalcoatlus", SearchKeyword, 5)
+		require.NoError(t, err)
+		require.Len(t, results, 1)
+		assert.Equal(t, 1, results[0].ChunkIndex)
+		assert.Positive(t, results[0].Score, "keyword hits carry a ts_rank score, not a distance")
+	})
+
+	t.Run("auto ranks the keyword match first even when vectors are tied", func(t *testing.T) {
+		// topK spans all chunks so every one is in the vector sub-ranking
+		// too; RRF still floats the keyword match to the top because it's
+		// the only chunk scoring on both sides.
+		results, err := s.SearchChunks(ctx, vec768(0), "quetzalcoatlus", SearchAuto, 3)
+		require.NoError(t, err)
+		require.NotEmpty(t, results)
+		assert.Equal(t, 1, results[0].ChunkIndex, "the exact-term chunk should rank first under RRF")
+	})
+}
+
+func TestChunkContents(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+	const path = "store_test.go::chunk_contents"
+	cleanupDocument(t, s, path)
+
+	docID, err := s.UpsertDocument(ctx, path, "h")
+	require.NoError(t, err)
+	require.NoError(t, s.ReplaceChunks(ctx, docID, []Chunk{
+		{Index: 0, Content: "chunk zero text", Embedding: vec768(0)},
+		{Index: 1, Content: "chunk one text", Embedding: vec768(0)},
+		{Index: 2, Content: "chunk two text", Embedding: vec768(0)},
+	}))
+
+	got, err := s.ChunkContents(ctx, path, []int{0, 2, 99})
+	require.NoError(t, err)
+	assert.Equal(t, map[int]string{0: "chunk zero text", 2: "chunk two text"}, got,
+		"returns the requested chunks by index; a missing index is simply absent")
+
+	empty, err := s.ChunkContents(ctx, path, nil)
+	require.NoError(t, err)
+	assert.Empty(t, empty)
 }
 
 func TestIngestDirHash_RoundTrip(t *testing.T) {

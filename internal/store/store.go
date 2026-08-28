@@ -10,6 +10,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/pgvector/pgvector-go"
 	pgxvec "github.com/pgvector/pgvector-go/pgx"
+
+	"github.com/MadonnaMat/go-rag-lab/internal/store/queries"
 )
 
 type Store struct {
@@ -53,14 +55,8 @@ func Open(ctx context.Context, databaseURL string) (*Store, error) {
 // UpsertDocument inserts a document row, or updates its content_hash if a
 // row for that path already exists, returning the row's id either way.
 func (s *Store) UpsertDocument(ctx context.Context, path, contentHash string) (int64, error) {
-	const q = `
-		INSERT INTO documents (path, content_hash)
-		VALUES ($1, $2)
-		ON CONFLICT (path) DO UPDATE SET content_hash = EXCLUDED.content_hash
-		RETURNING id`
-
 	var id int64
-	if err := s.pool.QueryRow(ctx, q, path, contentHash).Scan(&id); err != nil {
+	if err := s.pool.QueryRow(ctx, queries.UpsertDocument, path, contentHash).Scan(&id); err != nil {
 		return 0, fmt.Errorf("upsert document %q: %w", path, err)
 	}
 	return id, nil
@@ -90,11 +86,8 @@ func (s *Store) ReplaceChunks(ctx context.Context, documentID int64, chunks []Ch
 	// on its own reply before the inserts are even sent.
 	batch := &pgx.Batch{}
 	batch.Queue(`DELETE FROM chunks WHERE document_id = $1`, documentID)
-	const insert = `
-		INSERT INTO chunks (document_id, chunk_index, content, embedding)
-		VALUES ($1, $2, $3, $4)`
 	for _, c := range chunks {
-		batch.Queue(insert, documentID, c.Index, c.Content, pgvector.NewVector(c.Embedding))
+		batch.Queue(queries.InsertChunk, documentID, c.Index, c.Content, pgvector.NewVector(c.Embedding))
 	}
 
 	results := tx.SendBatch(ctx, batch)
@@ -118,30 +111,73 @@ func (s *Store) ReplaceChunks(ctx context.Context, documentID int64, chunks []Ch
 	return nil
 }
 
-// SearchResult is one chunk returned by a similarity search, together with
-// enough metadata to be useful to a caller: which document it came from and
-// how close a match it is.
+// SearchResult is one chunk returned by a search, together with enough
+// metadata to be useful to a caller: which document it came from, its index
+// within that document (so a caller can re-locate the exact passage — see
+// internal/api's /lore endpoint), and how good a match it is.
 type SearchResult struct {
-	Source   string
-	Content  string
+	Source     string
+	ChunkIndex int
+	Content    string
+	// Distance is pgvector cosine distance (1 - cosine similarity): 0 means
+	// an exact match, larger means less similar. It's 0 for a keyword-only
+	// hit that never ranked on the vector side.
 	Distance float64
+	// Score is the ranking score actually used, higher is better: the
+	// Reciprocal Rank Fusion score under SearchAuto, ts_rank under
+	// SearchKeyword, 0 under SearchVector (ordered by Distance there).
+	Score float64
 }
 
-// SearchChunks returns the topK chunks whose embeddings are closest to
-// queryEmbedding, nearest first, using pgvector's cosine-distance operator
-// (<=>) — the metric nomic-embed-text (internal/config's default) is
-// designed for, and the same one migration 000002's HNSW index is built
-// against. Distance is 1 - cosine similarity: 0 means an exact match,
-// larger means less similar.
-func (s *Store) SearchChunks(ctx context.Context, queryEmbedding []float32, topK int) ([]SearchResult, error) {
-	const q = `
-		SELECT d.path, c.content, c.embedding <=> $1 AS distance
-		FROM chunks c
-		JOIN documents d ON d.id = c.document_id
-		ORDER BY c.embedding <=> $1
-		LIMIT $2`
+// SearchMode selects how SearchChunks ranks chunks.
+type SearchMode string
 
-	rows, err := s.pool.Query(ctx, q, pgvector.NewVector(queryEmbedding), topK)
+const (
+	// SearchAuto fuses vector similarity and full-text keyword ranking with
+	// Reciprocal Rank Fusion — the default, and what a bare query wants.
+	SearchAuto SearchMode = "auto"
+	// SearchVector is pure pgvector cosine similarity.
+	SearchVector SearchMode = "vector"
+	// SearchKeyword is pure Postgres full-text search (ts_rank over the
+	// generated content_tsv column).
+	SearchKeyword SearchMode = "keyword"
+)
+
+// rrfK is the Reciprocal Rank Fusion constant passed to search_auto.sql as
+// $4: a list's score contribution is 1/(rrfK + rank). 60 is the value from
+// the original RRF paper and the common default — it damps the influence of
+// the very top ranks just enough that a strong hit in one signal doesn't
+// automatically dominate a moderate hit in both.
+const rrfK = 60
+
+// SearchChunks returns the topK best-matching chunks for a query, best
+// first. queryEmbedding drives the vector side; queryText drives the
+// full-text side (via websearch_to_tsquery, which never errors on arbitrary
+// input). mode picks which signal(s) to use; an empty mode means SearchAuto.
+func (s *Store) SearchChunks(ctx context.Context, queryEmbedding []float32, queryText string, mode SearchMode, topK int) ([]SearchResult, error) {
+	switch mode {
+	case "", SearchAuto:
+		return scanSearch(ctx, s.pool, queries.SearchAuto, func(r *SearchResult) []any {
+			return []any{&r.Source, &r.ChunkIndex, &r.Content, &r.Distance, &r.Score}
+		}, pgvector.NewVector(queryEmbedding), queryText, topK, rrfK)
+	case SearchVector:
+		return scanSearch(ctx, s.pool, queries.SearchVector, func(r *SearchResult) []any {
+			return []any{&r.Source, &r.ChunkIndex, &r.Content, &r.Distance}
+		}, pgvector.NewVector(queryEmbedding), topK)
+	case SearchKeyword:
+		return scanSearch(ctx, s.pool, queries.SearchKeyword, func(r *SearchResult) []any {
+			return []any{&r.Source, &r.ChunkIndex, &r.Content, &r.Score}
+		}, queryText, topK)
+	default:
+		return nil, fmt.Errorf("unknown search mode %q", mode)
+	}
+}
+
+// scanSearch runs a search query and scans each row into a SearchResult
+// using the caller-supplied field list — the three search variants differ
+// only in their SQL and which columns they select.
+func scanSearch(ctx context.Context, pool *pgxpool.Pool, query string, dest func(*SearchResult) []any, args ...any) ([]SearchResult, error) {
+	rows, err := pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("search chunks: %w", err)
 	}
@@ -150,7 +186,7 @@ func (s *Store) SearchChunks(ctx context.Context, queryEmbedding []float32, topK
 	var results []SearchResult
 	for rows.Next() {
 		var r SearchResult
-		if err := rows.Scan(&r.Source, &r.Content, &r.Distance); err != nil {
+		if err := rows.Scan(dest(&r)...); err != nil {
 			return nil, fmt.Errorf("scan search result: %w", err)
 		}
 		results = append(results, r)
@@ -173,14 +209,7 @@ type DocumentInfo struct {
 // ordered by path — a pure read over the existing tables (no schema of its
 // own). Used by the chat list_resources tool.
 func (s *Store) ListDocuments(ctx context.Context) ([]DocumentInfo, error) {
-	const q = `
-		SELECT d.path, count(c.id)
-		FROM documents d
-		LEFT JOIN chunks c ON c.document_id = d.id
-		GROUP BY d.path
-		ORDER BY d.path`
-
-	rows, err := s.pool.Query(ctx, q)
+	rows, err := s.pool.Query(ctx, queries.ListDocuments)
 	if err != nil {
 		return nil, fmt.Errorf("list documents: %w", err)
 	}
@@ -200,15 +229,41 @@ func (s *Store) ListDocuments(ctx context.Context) ([]DocumentInfo, error) {
 	return docs, nil
 }
 
+// ChunkContents returns the ingested text of the given chunk indices of the
+// document at docPath (bare filename — see internal/ingest.ingestFile),
+// keyed by chunk index. Indices with no matching row are simply absent from
+// the map. Used by internal/api's /lore endpoint to highlight cited
+// passages against the exact text that was embedded, not a re-derivation.
+func (s *Store) ChunkContents(ctx context.Context, docPath string, indices []int) (map[int]string, error) {
+	if len(indices) == 0 {
+		return map[int]string{}, nil
+	}
+
+	rows, err := s.pool.Query(ctx, queries.ChunkContents, docPath, indices)
+	if err != nil {
+		return nil, fmt.Errorf("chunk contents for %q: %w", docPath, err)
+	}
+	defer rows.Close()
+
+	out := make(map[int]string, len(indices))
+	for rows.Next() {
+		var idx int
+		var content string
+		if err := rows.Scan(&idx, &content); err != nil {
+			return nil, fmt.Errorf("scan chunk content: %w", err)
+		}
+		out[idx] = content
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate chunk contents: %w", err)
+	}
+	return out, nil
+}
+
 // UpsertCorpusSummary replaces the corpus_summary singleton row — called
 // once per ingestion run (see internal/ingest), not per chat request.
 func (s *Store) UpsertCorpusSummary(ctx context.Context, summary string) error {
-	const q = `
-		INSERT INTO corpus_summary (id, summary, updated_at)
-		VALUES (1, $1, now())
-		ON CONFLICT (id) DO UPDATE SET summary = EXCLUDED.summary, updated_at = EXCLUDED.updated_at`
-
-	if _, err := s.pool.Exec(ctx, q, summary); err != nil {
+	if _, err := s.pool.Exec(ctx, queries.UpsertCorpusSummary, summary); err != nil {
 		return fmt.Errorf("upsert corpus summary: %w", err)
 	}
 	return nil
@@ -248,12 +303,7 @@ func (s *Store) GetIngestDirHash(ctx context.Context) (string, error) {
 // per successful ingestion run (see internal/ingest), after all
 // documents/chunks/summary are written, not before.
 func (s *Store) SetIngestDirHash(ctx context.Context, hash string) error {
-	const q = `
-		INSERT INTO ingest_state (id, dir_hash, updated_at)
-		VALUES (1, $1, now())
-		ON CONFLICT (id) DO UPDATE SET dir_hash = EXCLUDED.dir_hash, updated_at = EXCLUDED.updated_at`
-
-	if _, err := s.pool.Exec(ctx, q, hash); err != nil {
+	if _, err := s.pool.Exec(ctx, queries.UpsertIngestDirHash, hash); err != nil {
 		return fmt.Errorf("set ingest dir hash: %w", err)
 	}
 	return nil

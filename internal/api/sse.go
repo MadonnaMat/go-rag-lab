@@ -22,9 +22,11 @@ type sseToolCallPayload struct {
 }
 
 type sseToolResultChunk struct {
-	Source   string  `json:"source"`
-	Content  string  `json:"content"`
-	Distance float64 `json:"distance"`
+	Source     string  `json:"source"`
+	ChunkIndex int     `json:"chunk_index"`
+	Content    string  `json:"content"`
+	Distance   float64 `json:"distance"`
+	Score      float64 `json:"score"`
 }
 
 type sseToolResultPayload struct {
@@ -66,6 +68,23 @@ type sseErrorPayload struct {
 	Error string `json:"error"`
 }
 
+type sseSource struct {
+	File         string `json:"file"`
+	ChunkIndices []int  `json:"chunk_indices"`
+}
+
+type sseSourcesPayload struct {
+	Sources []sseSource `json:"sources"`
+}
+
+func sourcesPayload(ev chat.Event) sseSourcesPayload {
+	out := make([]sseSource, len(ev.Sources))
+	for i, s := range ev.Sources {
+		out[i] = sseSource{File: s.File, ChunkIndices: s.ChunkIndices}
+	}
+	return sseSourcesPayload{Sources: out}
+}
+
 // toolResultPayload picks the right tool_result frame shape: an error, a
 // plain summary message (the non-retrieval tools), or retrieval chunks.
 func toolResultPayload(ev chat.Event) sseToolResultPayload {
@@ -77,7 +96,7 @@ func toolResultPayload(ev chat.Event) sseToolResultPayload {
 	}
 	results := make([]sseToolResultChunk, len(ev.ToolResult))
 	for i, r := range ev.ToolResult {
-		results[i] = sseToolResultChunk{Source: r.Source, Content: r.Content, Distance: r.Distance}
+		results[i] = sseToolResultChunk{Source: r.Source, ChunkIndex: r.ChunkIndex, Content: r.Content, Distance: r.Distance, Score: r.Score}
 	}
 	return sseToolResultPayload{Results: results}
 }
@@ -103,6 +122,8 @@ func (e *sseEncoder) write(ev chat.Event) error {
 		return e.frame("revised", sseRevisedPayload{Content: ev.Revised})
 	case chat.EventContextUsage:
 		return e.frame("context_usage", sseContextUsagePayload{UsedTokens: ev.UsedTokens, ContextTokens: ev.ContextTokens})
+	case chat.EventSources:
+		return e.frame("sources", sourcesPayload(ev))
 	case chat.EventDone:
 		return e.frame("done", struct{}{})
 	case chat.EventError:

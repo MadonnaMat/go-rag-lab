@@ -23,7 +23,7 @@ import (
 // Defining it here (rather than depending on the concrete type) lets tests
 // substitute a fake — same reasoning as retrieve.Store.
 type Retriever interface {
-	Query(ctx context.Context, q string, topK int) ([]store.SearchResult, error)
+	Query(ctx context.Context, q string, mode store.SearchMode, topK int) ([]store.SearchResult, error)
 }
 
 // Chatter is the subset of *chat.Chatter the HTTP layer needs.
@@ -37,6 +37,11 @@ type Handler struct {
 	Chatter   Chatter
 	// DefaultTopK is used when a request omits top_k (or sets it <= 0).
 	DefaultTopK int
+	// LoreDir is the directory GET /lore/{name} reads .md files from.
+	LoreDir string
+	// LoreChunks supplies the ingested text of cited chunks so /lore can
+	// highlight them; optional (nil disables highlighting).
+	LoreChunks LoreChunkSource
 }
 
 // NewRouter builds the HTTP routes backed by h.
@@ -46,6 +51,7 @@ func NewRouter(h *Handler) http.Handler {
 	r.Use(middleware.Logger)
 	r.Get("/healthz", h.handleHealthz)
 	r.Get("/query", h.handleQuery)
+	r.Get("/lore/{name}", h.handleLore)
 	r.Post("/chat", h.handleChat)
 	r.Get("/", h.handleChatPage)
 	r.Handle("/static/*", http.StripPrefix("/static/", http.FileServerFS(staticFS)))
@@ -55,9 +61,17 @@ func NewRouter(h *Handler) http.Handler {
 
 // QueryResult is one ranked chunk in a QueryResponse.
 type QueryResult struct {
-	Source   string  `json:"source"`
-	Content  string  `json:"content"`
+	Source     string `json:"source"`
+	ChunkIndex int    `json:"chunk_index"`
+	Content    string `json:"content"`
+	// Distance is pgvector cosine distance — meaningful for mode=vector and
+	// for a chunk that ranked on the vector side under mode=auto; 0 for a
+	// keyword-only hit.
 	Distance float64 `json:"distance"`
+	// Score is the ranking score actually used: RRF for mode=auto, ts_rank
+	// for mode=keyword, 0 for mode=vector (order by Distance there). Higher
+	// is better. This is the field to sort/threshold on.
+	Score float64 `json:"score"`
 }
 
 // QueryResponse is the GET /query response body.
@@ -73,6 +87,7 @@ type QueryResponse struct {
 //	@Produce		json
 //	@Param			query	query		string	true	"Query text"
 //	@Param			top_k	query		int		false	"Number of results to return (defaults to the server's configured default)"
+//	@Param			mode	query		string	false	"Ranking mode: auto (default, hybrid), vector, or keyword"
 //	@Success		200		{object}	QueryResponse
 //	@Failure		400		{object}	map[string]string
 //	@Failure		500		{object}	map[string]string
@@ -96,7 +111,15 @@ func (h *Handler) handleQuery(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	results, err := h.Retriever.Query(r.Context(), q, topK)
+	mode := store.SearchMode(r.URL.Query().Get("mode"))
+	switch mode {
+	case "", store.SearchAuto, store.SearchVector, store.SearchKeyword:
+	default:
+		writeError(w, http.StatusBadRequest, "mode must be auto, vector, or keyword")
+		return
+	}
+
+	results, err := h.Retriever.Query(r.Context(), q, mode, topK)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -104,7 +127,7 @@ func (h *Handler) handleQuery(w http.ResponseWriter, r *http.Request) {
 
 	resp := QueryResponse{Results: make([]QueryResult, len(results))}
 	for i, res := range results {
-		resp.Results[i] = QueryResult{Source: res.Source, Content: res.Content, Distance: res.Distance}
+		resp.Results[i] = QueryResult{Source: res.Source, ChunkIndex: res.ChunkIndex, Content: res.Content, Distance: res.Distance, Score: res.Score}
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -125,7 +148,7 @@ type ChatRequest struct {
 // handleChat godoc
 //
 //	@Summary		Tool-calling RAG chat
-//	@Description	Streams a chat response over Server-Sent Events. The model may call a document-retrieval tool zero or more times before producing a final answer. Event types: tool_call, tool_result, thinking, token, compacted, verifying, revised, context_usage, done, error. Swag/OpenAPI 2.0 can't represent an SSE event stream's per-event payloads, so only the request body is documented here.
+//	@Description	Streams a chat response over Server-Sent Events. The model may call a document-retrieval tool zero or more times before producing a final answer. Event types: tool_call, tool_result, thinking, token, compacted, verifying, revised, context_usage, sources, done, error. Swag/OpenAPI 2.0 can't represent an SSE event stream's per-event payloads, so only the request body is documented here.
 //	@Tags			chat
 //	@Accept			json
 //	@Produce		text/event-stream

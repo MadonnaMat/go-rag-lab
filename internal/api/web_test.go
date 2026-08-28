@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"net/http/httptest"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -146,4 +148,134 @@ func TestWeb_CompactIndicatorClick(t *testing.T) {
 	require.Len(t, chatter.gotHist, 3)
 	last := chatter.gotHist[len(chatter.gotHist)-1]
 	assert.Equal(t, "/compact", last.Content)
+}
+
+// TestWeb_CompactionNotice proves a /compact turn renders as a centered
+// divider notice carrying the summary — not an empty chat bubble.
+func TestWeb_CompactionNotice(t *testing.T) {
+	requireChrome(t)
+
+	chatter := &fakeChatter{events: []chat.Event{
+		{Type: chat.EventCompacting},
+		{Type: chat.EventCompacted, Summary: "Earlier turns covered ulmarin biology and diet."},
+		{Type: chat.EventContextUsage, UsedTokens: 200, ContextTokens: 1000},
+		{Type: chat.EventDone},
+	}}
+	srv := httptest.NewServer(NewRouter(&Handler{Chatter: chatter}))
+	defer srv.Close()
+
+	ctx, cancel := context.WithTimeout(newChromedpContext(t), 60*time.Second)
+	defer cancel()
+
+	var noticeText string
+	var bubbleCount int
+	err := chromedp.Run(ctx,
+		chromedp.Navigate(srv.URL+"/"),
+		chromedp.WaitVisible("#chat-input", chromedp.ByQuery),
+		chromedp.SendKeys("#chat-input", "/compact", chromedp.ByQuery),
+		chromedp.Click("#chat-send", chromedp.ByQuery),
+		chromedp.WaitEnabled("#chat-input", chromedp.ByQuery),
+		chromedp.WaitVisible(".compaction-notice", chromedp.ByQuery),
+		chromedp.Text(".compaction-notice", &noticeText, chromedp.ByQuery),
+		chromedp.Evaluate(`document.querySelectorAll('#messages .message').length`, &bubbleCount),
+	)
+	require.NoError(t, err)
+
+	assert.Contains(t, noticeText, "Context compacted")
+	assert.Contains(t, noticeText, "ulmarin biology and diet")
+	assert.Equal(t, 0, bubbleCount, "a /compact turn renders no chat bubbles (x-if, not just hidden)")
+}
+
+// TestWeb_SourceDrawer proves the "sources" frame renders clickable chips
+// under the answer, and clicking one opens the drawer with the .md rendered
+// and its cited passage highlighted.
+func TestWeb_SourceDrawer(t *testing.T) {
+	requireChrome(t)
+
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "03-diet.md"),
+		[]byte("# Diet\n\nThe ulmarin graze on drifting glowfronds at dusk.\n\nUnrelated closing note.\n"), 0o600))
+
+	chatter := &fakeChatter{events: []chat.Event{
+		{Type: chat.EventToken, Token: "They eat glowfronds [03-diet.md]."},
+		{Type: chat.EventSources, Sources: []chat.SourceRef{{File: "03-diet.md", ChunkIndices: []int{0}}}},
+		{Type: chat.EventContextUsage, UsedTokens: 100, ContextTokens: 1000},
+		{Type: chat.EventDone},
+	}}
+	srv := httptest.NewServer(NewRouter(&Handler{
+		Chatter: chatter,
+		LoreDir: dir,
+		LoreChunks: &fakeChunkSource{byPath: map[string]map[int]string{
+			"03-diet.md": {0: "The ulmarin graze on drifting glowfronds at dusk."},
+		}},
+	}))
+	defer srv.Close()
+
+	ctx, cancel := context.WithTimeout(newChromedpContext(t), 60*time.Second)
+	defer cancel()
+
+	var chipText, drawerFile, markText string
+	var drawerOpen bool
+	err := chromedp.Run(ctx,
+		chromedp.Navigate(srv.URL+"/"),
+		chromedp.WaitVisible("#chat-input", chromedp.ByQuery),
+		chromedp.SendKeys("#chat-input", "what do they eat?", chromedp.ByQuery),
+		chromedp.Click("#chat-send", chromedp.ByQuery),
+		chromedp.WaitEnabled("#chat-input", chromedp.ByQuery),
+		chromedp.WaitVisible(".sources .source-chip", chromedp.ByQuery),
+		chromedp.Text(".sources .source-chip", &chipText, chromedp.ByQuery),
+		chromedp.Click(".sources .source-chip", chromedp.ByQuery),
+		chromedp.WaitVisible(".drawer.drawer-open .markdown-body h1", chromedp.ByQuery),
+		chromedp.EvaluateAsDevTools(`document.querySelector('.drawer').classList.contains('drawer-open')`, &drawerOpen),
+		chromedp.Text(".drawer-head span", &drawerFile, chromedp.ByQuery),
+		chromedp.Text(".drawer-body p.cited", &markText, chromedp.ByQuery),
+	)
+	require.NoError(t, err)
+
+	assert.Equal(t, "03-diet.md", chipText)
+	assert.True(t, drawerOpen)
+	assert.Equal(t, "03-diet.md", drawerFile)
+	assert.Contains(t, markText, "glowfronds", "the cited chunk should be highlighted in the drawer")
+
+	// Closing the drawer removes the open class.
+	var stillOpen bool
+	err = chromedp.Run(ctx,
+		chromedp.EvaluateAsDevTools(`document.querySelector('.drawer-close').click()`, nil),
+		chromedp.Sleep(500*time.Millisecond),
+		chromedp.EvaluateAsDevTools(`document.querySelector('.drawer').classList.contains('drawer-open')`, &stillOpen),
+	)
+	require.NoError(t, err)
+	assert.False(t, stillOpen, "closeDrawer should remove .drawer-open")
+}
+
+// TestWeb_AutoScroll proves the transcript follows a streaming reply down to
+// the bottom, but stops sticking once the user scrolls up.
+func TestWeb_AutoScroll(t *testing.T) {
+	requireChrome(t)
+
+	var events []chat.Event
+	for i := 0; i < 60; i++ { // enough tokens to overflow the message pane
+		events = append(events, chat.Event{Type: chat.EventToken, Token: "line of streamed answer text " + fmt.Sprint(i) + "\n"})
+	}
+	events = append(events, chat.Event{Type: chat.EventDone})
+	srv := httptest.NewServer(NewRouter(&Handler{Chatter: &fakeChatter{events: events}}))
+	defer srv.Close()
+
+	ctx, cancel := context.WithTimeout(newChromedpContext(t), 60*time.Second)
+	defer cancel()
+
+	var pinnedAfterStream, stuckAfterScrollUp bool
+	err := chromedp.Run(ctx,
+		chromedp.Navigate(srv.URL+"/"),
+		chromedp.WaitVisible("#chat-input", chromedp.ByQuery),
+		chromedp.SendKeys("#chat-input", "go", chromedp.ByQuery),
+		chromedp.Click("#chat-send", chromedp.ByQuery),
+		chromedp.WaitEnabled("#chat-input", chromedp.ByQuery),
+		chromedp.EvaluateAsDevTools(`(() => { const el = document.getElementById('messages'); return el.scrollHeight - el.scrollTop - el.clientHeight < 40; })()`, &pinnedAfterStream),
+		// Scroll up: the transcript should stop sticking to the bottom.
+		chromedp.EvaluateAsDevTools(`(() => { const el = document.getElementById('messages'); el.scrollTop = 0; el.dispatchEvent(new Event('scroll')); return Alpine.$data(document.querySelector('[x-data]')).stick; })()`, &stuckAfterScrollUp),
+	)
+	require.NoError(t, err)
+	assert.True(t, pinnedAfterStream, "transcript should be scrolled to the bottom after a streamed reply")
+	assert.False(t, stuckAfterScrollUp, "scrolling up should disable autoscroll")
 }

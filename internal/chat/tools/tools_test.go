@@ -15,14 +15,15 @@ import (
 )
 
 type fakeRetriever struct {
-	results []store.SearchResult
-	err     error
-	lastQ   string
-	lastK   int
+	results  []store.SearchResult
+	err      error
+	lastQ    string
+	lastMode store.SearchMode
+	lastK    int
 }
 
-func (f *fakeRetriever) Query(_ context.Context, q string, topK int) ([]store.SearchResult, error) {
-	f.lastQ, f.lastK = q, topK
+func (f *fakeRetriever) Query(_ context.Context, q string, mode store.SearchMode, topK int) ([]store.SearchResult, error) {
+	f.lastQ, f.lastMode, f.lastK = q, mode, topK
 	return f.results, f.err
 }
 
@@ -78,14 +79,29 @@ func TestAvailable_GatedOnDeps(t *testing.T) {
 }
 
 func TestRetrieve(t *testing.T) {
-	fr := &fakeRetriever{results: []store.SearchResult{{Source: "a.md", Content: "chunk text", Distance: 0.1}}}
-	res := run(t, "retrieve_documents", map[string]any{"query": "q", "top_k": float64(2)}, Deps{Retriever: fr, DefaultTopK: 5})
+	fr := &fakeRetriever{results: []store.SearchResult{{Source: "a.md", ChunkIndex: 4, Content: "chunk text", Distance: 0, Score: 0.83}}}
+	res := run(t, "retrieve_documents", map[string]any{"query": "q", "top_k": float64(2), "mode": "keyword"}, Deps{Retriever: fr, DefaultTopK: 5})
 
 	require.NoError(t, res.Err)
 	assert.Equal(t, 2, fr.lastK)
+	assert.Equal(t, store.SearchKeyword, fr.lastMode)
 	assert.Len(t, res.Chunks, 1)
 	assert.Contains(t, res.Content, "chunk text")
+	assert.Contains(t, res.Content, `"chunk_index":4`)
+	assert.Contains(t, res.Content, `"score":0.83`, "the ranking score must reach the model — distance is 0 for a keyword hit")
 	assert.Empty(t, res.Summary, "retrieve leaves Summary empty so the UI renders the chunk list")
+}
+
+func TestRetrieve_DefaultsToAutoMode(t *testing.T) {
+	fr := &fakeRetriever{}
+	res := run(t, "retrieve_documents", map[string]any{"query": "q"}, Deps{Retriever: fr, DefaultTopK: 5})
+	require.NoError(t, res.Err)
+	assert.Equal(t, store.SearchAuto, fr.lastMode)
+}
+
+func TestRetrieve_RejectsBadMode(t *testing.T) {
+	res := run(t, "retrieve_documents", map[string]any{"query": "q", "mode": "fuzzy"}, Deps{Retriever: &fakeRetriever{}, DefaultTopK: 5})
+	require.Error(t, res.Err)
 }
 
 func TestRetrieve_MissingQuery(t *testing.T) {
