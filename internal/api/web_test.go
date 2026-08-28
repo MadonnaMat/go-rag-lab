@@ -207,3 +207,35 @@ func TestWeb_SourceDrawer(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, stillOpen, "closeDrawer should remove .drawer-open")
 }
+
+// TestWeb_AutoScroll proves the transcript follows a streaming reply down to
+// the bottom, but stops sticking once the user scrolls up.
+func TestWeb_AutoScroll(t *testing.T) {
+	requireChrome(t)
+
+	var events []chat.Event
+	for i := 0; i < 60; i++ { // enough tokens to overflow the message pane
+		events = append(events, chat.Event{Type: chat.EventToken, Token: "line of streamed answer text " + fmt.Sprint(i) + "\n"})
+	}
+	events = append(events, chat.Event{Type: chat.EventDone})
+	srv := httptest.NewServer(NewRouter(&Handler{Chatter: &fakeChatter{events: events}}))
+	defer srv.Close()
+
+	ctx, cancel := context.WithTimeout(newChromedpContext(t), 60*time.Second)
+	defer cancel()
+
+	var pinnedAfterStream, stuckAfterScrollUp bool
+	err := chromedp.Run(ctx,
+		chromedp.Navigate(srv.URL+"/"),
+		chromedp.WaitVisible("#chat-input", chromedp.ByQuery),
+		chromedp.SendKeys("#chat-input", "go", chromedp.ByQuery),
+		chromedp.Click("#chat-send", chromedp.ByQuery),
+		chromedp.WaitEnabled("#chat-input", chromedp.ByQuery),
+		chromedp.EvaluateAsDevTools(`(() => { const el = document.getElementById('messages'); return el.scrollHeight - el.scrollTop - el.clientHeight < 40; })()`, &pinnedAfterStream),
+		// Scroll up: the transcript should stop sticking to the bottom.
+		chromedp.EvaluateAsDevTools(`(() => { const el = document.getElementById('messages'); el.scrollTop = 0; el.dispatchEvent(new Event('scroll')); return Alpine.$data(document.querySelector('[x-data]')).stick; })()`, &stuckAfterScrollUp),
+	)
+	require.NoError(t, err)
+	assert.True(t, pinnedAfterStream, "transcript should be scrolled to the bottom after a streamed reply")
+	assert.False(t, stuckAfterScrollUp, "scrolling up should disable autoscroll")
+}

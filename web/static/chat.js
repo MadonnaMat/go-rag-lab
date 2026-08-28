@@ -13,6 +13,10 @@ function chatApp() {
     errorMessage: "",
     usedTokens: 0,
     contextTokens: null,
+    // Whether the transcript is "stuck" to the bottom (autoscrolls on new
+    // content). Flips off when the user scrolls up, back on when they
+    // scroll back down or send a message.
+    stick: true,
     // Source drawer: shows one lore .md rendered server-side, cited passages
     // highlighted. file/chunks come from the "sources" SSE frame.
     drawer: { open: false, file: "", html: "", loading: false },
@@ -34,7 +38,27 @@ function chatApp() {
       if (!text || this.streaming) return;
       this.input = "";
       this.messages.push({ role: "user", content: text, status: "", sources: [] });
+      this.stick = true; // a fresh send always follows the conversation down
+      this.scrollDown();
       this.runTurn();
+    },
+
+    // Keep the transcript pinned to the bottom as replies stream in, but
+    // only while the user hasn't scrolled up to read earlier messages
+    // (this.stick, refreshed on every scroll event — see x-on:scroll in the
+    // template). $nextTick so the DOM has the new content before we measure.
+    scrollDown() {
+      if (!this.stick) return;
+      this.$nextTick(() => {
+        const el = document.getElementById("messages");
+        if (el) el.scrollTop = el.scrollHeight;
+      });
+    },
+
+    onScroll() {
+      const el = document.getElementById("messages");
+      if (!el) return;
+      this.stick = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
     },
 
     // Sent by the context-usage indicator's click handler — same
@@ -42,6 +66,8 @@ function chatApp() {
     compact() {
       if (this.streaming || this.contextTokens === null) return;
       this.messages.push({ role: "user", content: "/compact", status: "", sources: [] });
+      this.stick = true;
+      this.scrollDown();
       this.runTurn();
     },
 
@@ -190,6 +216,7 @@ function chatApp() {
         default:
           break;
       }
+      this.scrollDown();
     },
 
     // Opens the drawer for one source: fetches the .md rendered to HTML
