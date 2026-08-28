@@ -17,27 +17,33 @@ func TestAnswerSources(t *testing.T) {
 	}
 
 	t.Run("keeps only cited files when the answer cites", func(t *testing.T) {
-		got := answerSources("The drift-circles migrate [a.md]. Unrelated aside.", retrieved)
+		got := answerSources("", "The drift-circles migrate [a.md]. Unrelated aside.", retrieved)
 		require.Len(t, got, 1)
 		assert.Equal(t, "a.md", got[0].File)
 		assert.Equal(t, []int{2, 5}, got[0].ChunkIndices)
 	})
 
-	t.Run("falls back to every retrieved file when the answer cites nothing", func(t *testing.T) {
-		got := answerSources("A plain answer with no markers.", retrieved)
+	t.Run("counts a citation the verify pass dropped from the final answer", func(t *testing.T) {
+		got := answerSources("Per [a.md], they migrate.", "They migrate seasonally.", retrieved)
+		require.Len(t, got, 1)
+		assert.Equal(t, "a.md", got[0].File)
+	})
+
+	t.Run("falls back to every retrieved file when nothing cites", func(t *testing.T) {
+		got := answerSources("", "A plain answer with no markers.", retrieved)
 		require.Len(t, got, 2)
 		assert.Equal(t, "a.md", got[0].File)
 		assert.Equal(t, "b.md", got[1].File)
 	})
 
 	t.Run("ignores citations to files that were never retrieved", func(t *testing.T) {
-		got := answerSources("As noted in [c.md] and [a.md].", retrieved)
+		got := answerSources("", "As noted in [c.md] and [a.md].", retrieved)
 		require.Len(t, got, 1)
 		assert.Equal(t, "a.md", got[0].File)
 	})
 
 	t.Run("nothing retrieved yields no sources", func(t *testing.T) {
-		assert.Nil(t, answerSources("cites [a.md]", nil))
+		assert.Nil(t, answerSources("", "cites [a.md]", nil))
 	})
 }
 

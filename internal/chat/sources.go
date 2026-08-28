@@ -15,13 +15,16 @@ var citationRe = regexp.MustCompile(`\[([^\[\]/\\]+\.md)\]`)
 // answerSources works out which ingested documents the final answer drew on.
 //
 // Primary signal: the [name.md] markers the model left in its answer, kept
-// only if they match a document actually retrieved this turn. Fallback: if
-// the model cited nothing, every distinct document retrieved this turn — a
-// coarser "here's what was on the table" list rather than nothing.
+// only if they match a document actually retrieved this turn. Both the
+// pre-verification draft and the final (possibly rewritten) answer are
+// scanned, so a citation the verify pass drops while rewriting still
+// counts. Fallback: if neither mentions a retrieved document, every
+// distinct document retrieved this turn — a coarser "here's what was on
+// the table" list rather than nothing.
 //
 // Either way the result is ordered by first retrieval and each entry
 // carries the sorted, de-duplicated chunk indices seen from that file.
-func answerSources(answer string, retrieved []store.SearchResult) []SourceRef {
+func answerSources(draft, final string, retrieved []store.SearchResult) []SourceRef {
 	if len(retrieved) == 0 {
 		return nil
 	}
@@ -38,10 +41,12 @@ func answerSources(answer string, retrieved []store.SearchResult) []SourceRef {
 	}
 
 	cited := map[string]struct{}{}
-	for _, m := range citationRe.FindAllStringSubmatch(answer, -1) {
-		name := strings.TrimSpace(m[1])
-		if _, ok := idxByFile[name]; ok {
-			cited[name] = struct{}{}
+	for _, text := range [...]string{draft, final} {
+		for _, m := range citationRe.FindAllStringSubmatch(text, -1) {
+			name := strings.TrimSpace(m[1])
+			if _, ok := idxByFile[name]; ok {
+				cited[name] = struct{}{}
+			}
 		}
 	}
 

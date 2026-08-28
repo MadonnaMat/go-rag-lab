@@ -194,7 +194,7 @@ func TestWeb_SourceDrawer(t *testing.T) {
 
 	dir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "03-diet.md"),
-		[]byte("# Diet\n\nThe ulmarin graze on drifting glowfronds at dusk.\n"), 0o600))
+		[]byte("# Diet\n\nThe ulmarin graze on drifting glowfronds at dusk.\n\nUnrelated closing note.\n"), 0o600))
 
 	chatter := &fakeChatter{events: []chat.Event{
 		{Type: chat.EventToken, Token: "They eat glowfronds [03-diet.md]."},
@@ -203,7 +203,11 @@ func TestWeb_SourceDrawer(t *testing.T) {
 		{Type: chat.EventDone},
 	}}
 	srv := httptest.NewServer(NewRouter(&Handler{
-		Chatter: chatter, LoreDir: dir, ChunkSize: 1000, ChunkOverlap: 200,
+		Chatter: chatter,
+		LoreDir: dir,
+		LoreChunks: &fakeChunkSource{byPath: map[string]map[int]string{
+			"03-diet.md": {0: "The ulmarin graze on drifting glowfronds at dusk."},
+		}},
 	}))
 	defer srv.Close()
 

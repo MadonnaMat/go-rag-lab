@@ -79,7 +79,7 @@ func TestAvailable_GatedOnDeps(t *testing.T) {
 }
 
 func TestRetrieve(t *testing.T) {
-	fr := &fakeRetriever{results: []store.SearchResult{{Source: "a.md", ChunkIndex: 4, Content: "chunk text", Distance: 0.1}}}
+	fr := &fakeRetriever{results: []store.SearchResult{{Source: "a.md", ChunkIndex: 4, Content: "chunk text", Distance: 0, Score: 0.83}}}
 	res := run(t, "retrieve_documents", map[string]any{"query": "q", "top_k": float64(2), "mode": "keyword"}, Deps{Retriever: fr, DefaultTopK: 5})
 
 	require.NoError(t, res.Err)
@@ -88,6 +88,7 @@ func TestRetrieve(t *testing.T) {
 	assert.Len(t, res.Chunks, 1)
 	assert.Contains(t, res.Content, "chunk text")
 	assert.Contains(t, res.Content, `"chunk_index":4`)
+	assert.Contains(t, res.Content, `"score":0.83`, "the ranking score must reach the model — distance is 0 for a keyword hit")
 	assert.Empty(t, res.Summary, "retrieve leaves Summary empty so the UI renders the chunk list")
 }
 

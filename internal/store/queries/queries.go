@@ -26,6 +26,8 @@ var (
 	InsertChunk string
 	//go:embed list_documents.sql
 	ListDocuments string
+	//go:embed chunk_contents.sql
+	ChunkContents string
 	//go:embed upsert_corpus_summary.sql
 	UpsertCorpusSummary string
 	//go:embed upsert_ingest_dir_hash.sql

@@ -47,11 +47,11 @@ func TestHandleQuery(t *testing.T) {
 		wantTopK         int
 	}{
 		{
-			name:             "happy path",
+			name:             "happy path exposes chunk_index and score",
 			query:            url.Values{"query": {"how does X work"}, "top_k": {"2"}},
-			retriever:        &fakeRetriever{results: []store.SearchResult{{Source: "a.md", ChunkIndex: 2, Content: "hello", Distance: 0.1}}},
+			retriever:        &fakeRetriever{results: []store.SearchResult{{Source: "a.md", ChunkIndex: 2, Content: "hello", Distance: 0, Score: 0.42}}},
 			wantStatus:       http.StatusOK,
-			wantBodyContains: `"chunk_index":2`,
+			wantBodyContains: `"chunk_index":2,"content":"hello","distance":0,"score":0.42`,
 			wantCalled:       true,
 			wantTopK:         2,
 		},

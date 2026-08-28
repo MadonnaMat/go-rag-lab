@@ -15,12 +15,13 @@ type toolResultChunk struct {
 	ChunkIndex int     `json:"chunk_index"`
 	Content    string  `json:"content"`
 	Distance   float64 `json:"distance"`
+	Score      float64 `json:"score"`
 }
 
 func toResultChunks(results []store.SearchResult) []toolResultChunk {
 	out := make([]toolResultChunk, len(results))
 	for i, r := range results {
-		out[i] = toolResultChunk{Source: r.Source, ChunkIndex: r.ChunkIndex, Content: r.Content, Distance: r.Distance}
+		out[i] = toolResultChunk{Source: r.Source, ChunkIndex: r.ChunkIndex, Content: r.Content, Distance: r.Distance, Score: r.Score}
 	}
 	return out
 }

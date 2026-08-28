@@ -268,7 +268,7 @@ func (c *Chatter) finalize(ctx context.Context, messages []chatMessage, draftCon
 	}
 	messages = append(messages, chatMessage{Role: "assistant", Content: finalContent})
 
-	if sources := answerSources(finalContent, retrieved); len(sources) > 0 {
+	if sources := answerSources(draftContent, finalContent, retrieved); len(sources) > 0 {
 		if err := emit(Event{Type: EventSources, Sources: sources}); err != nil {
 			return err
 		}

@@ -71,7 +71,7 @@ func (retrieve) Run(ctx context.Context, call Call, deps Deps) Result {
 
 	chunks := make([]RetrievedChunk, len(results))
 	for i, r := range results {
-		chunks[i] = RetrievedChunk{Source: r.Source, ChunkIndex: r.ChunkIndex, Content: r.Content, Distance: r.Distance}
+		chunks[i] = RetrievedChunk{Source: r.Source, ChunkIndex: r.ChunkIndex, Content: r.Content, Distance: r.Distance, Score: r.Score}
 	}
 	payload, _ := json.Marshal(chunks)
 	return Result{Content: string(payload), Chunks: results}

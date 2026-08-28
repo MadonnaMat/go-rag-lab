@@ -97,12 +97,11 @@ func run(addrFlag string) error {
 	}
 
 	handler := api.NewRouter(&api.Handler{
-		Retriever:    retriever,
-		Chatter:      chatter,
-		DefaultTopK:  cfg.TopK,
-		LoreDir:      cfg.LoreDir,
-		ChunkSize:    cfg.ChunkSize,
-		ChunkOverlap: cfg.ChunkOverlap,
+		Retriever:   retriever,
+		Chatter:     chatter,
+		DefaultTopK: cfg.TopK,
+		LoreDir:     cfg.LoreDir,
+		LoreChunks:  s,
 	})
 
 	log.Printf("listening on %s", addr)

@@ -37,12 +37,11 @@ type Handler struct {
 	Chatter   Chatter
 	// DefaultTopK is used when a request omits top_k (or sets it <= 0).
 	DefaultTopK int
-	// LoreDir, ChunkSize and ChunkOverlap back GET /lore/{name}: it reads the
-	// .md file from LoreDir and re-derives chunk ranges with the same
-	// chunking parameters ingestion used.
-	LoreDir      string
-	ChunkSize    int
-	ChunkOverlap int
+	// LoreDir is the directory GET /lore/{name} reads .md files from.
+	LoreDir string
+	// LoreChunks supplies the ingested text of cited chunks so /lore can
+	// highlight them; optional (nil disables highlighting).
+	LoreChunks LoreChunkSource
 }
 
 // NewRouter builds the HTTP routes backed by h.
@@ -62,10 +61,17 @@ func NewRouter(h *Handler) http.Handler {
 
 // QueryResult is one ranked chunk in a QueryResponse.
 type QueryResult struct {
-	Source     string  `json:"source"`
-	ChunkIndex int     `json:"chunk_index"`
-	Content    string  `json:"content"`
-	Distance   float64 `json:"distance"`
+	Source     string `json:"source"`
+	ChunkIndex int    `json:"chunk_index"`
+	Content    string `json:"content"`
+	// Distance is pgvector cosine distance — meaningful for mode=vector and
+	// for a chunk that ranked on the vector side under mode=auto; 0 for a
+	// keyword-only hit.
+	Distance float64 `json:"distance"`
+	// Score is the ranking score actually used: RRF for mode=auto, ts_rank
+	// for mode=keyword, 0 for mode=vector (order by Distance there). Higher
+	// is better. This is the field to sort/threshold on.
+	Score float64 `json:"score"`
 }
 
 // QueryResponse is the GET /query response body.
@@ -121,7 +127,7 @@ func (h *Handler) handleQuery(w http.ResponseWriter, r *http.Request) {
 
 	resp := QueryResponse{Results: make([]QueryResult, len(results))}
 	for i, res := range results {
-		resp.Results[i] = QueryResult{Source: res.Source, ChunkIndex: res.ChunkIndex, Content: res.Content, Distance: res.Distance}
+		resp.Results[i] = QueryResult{Source: res.Source, ChunkIndex: res.ChunkIndex, Content: res.Content, Distance: res.Distance, Score: res.Score}
 	}
 	writeJSON(w, http.StatusOK, resp)
 }

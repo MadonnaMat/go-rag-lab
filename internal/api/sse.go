@@ -22,9 +22,11 @@ type sseToolCallPayload struct {
 }
 
 type sseToolResultChunk struct {
-	Source   string  `json:"source"`
-	Content  string  `json:"content"`
-	Distance float64 `json:"distance"`
+	Source     string  `json:"source"`
+	ChunkIndex int     `json:"chunk_index"`
+	Content    string  `json:"content"`
+	Distance   float64 `json:"distance"`
+	Score      float64 `json:"score"`
 }
 
 type sseToolResultPayload struct {
@@ -94,7 +96,7 @@ func toolResultPayload(ev chat.Event) sseToolResultPayload {
 	}
 	results := make([]sseToolResultChunk, len(ev.ToolResult))
 	for i, r := range ev.ToolResult {
-		results[i] = sseToolResultChunk{Source: r.Source, Content: r.Content, Distance: r.Distance}
+		results[i] = sseToolResultChunk{Source: r.Source, ChunkIndex: r.ChunkIndex, Content: r.Content, Distance: r.Distance, Score: r.Score}
 	}
 	return sseToolResultPayload{Results: results}
 }

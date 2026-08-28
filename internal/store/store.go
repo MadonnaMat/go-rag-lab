@@ -123,8 +123,9 @@ type SearchResult struct {
 	// an exact match, larger means less similar. It's 0 for a keyword-only
 	// hit that never ranked on the vector side.
 	Distance float64
-	// Score is the Reciprocal Rank Fusion score for SearchAuto (higher is
-	// better); 0 for the single-signal modes.
+	// Score is the ranking score actually used, higher is better: the
+	// Reciprocal Rank Fusion score under SearchAuto, ts_rank under
+	// SearchKeyword, 0 under SearchVector (ordered by Distance there).
 	Score float64
 }
 
@@ -226,6 +227,37 @@ func (s *Store) ListDocuments(ctx context.Context) ([]DocumentInfo, error) {
 		return nil, fmt.Errorf("iterate documents: %w", err)
 	}
 	return docs, nil
+}
+
+// ChunkContents returns the ingested text of the given chunk indices of the
+// document at docPath (bare filename — see internal/ingest.ingestFile),
+// keyed by chunk index. Indices with no matching row are simply absent from
+// the map. Used by internal/api's /lore endpoint to highlight cited
+// passages against the exact text that was embedded, not a re-derivation.
+func (s *Store) ChunkContents(ctx context.Context, docPath string, indices []int) (map[int]string, error) {
+	if len(indices) == 0 {
+		return map[int]string{}, nil
+	}
+
+	rows, err := s.pool.Query(ctx, queries.ChunkContents, docPath, indices)
+	if err != nil {
+		return nil, fmt.Errorf("chunk contents for %q: %w", docPath, err)
+	}
+	defer rows.Close()
+
+	out := make(map[int]string, len(indices))
+	for rows.Next() {
+		var idx int
+		var content string
+		if err := rows.Scan(&idx, &content); err != nil {
+			return nil, fmt.Errorf("scan chunk content: %w", err)
+		}
+		out[idx] = content
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate chunk contents: %w", err)
+	}
+	return out, nil
 }
 
 // UpsertCorpusSummary replaces the corpus_summary singleton row — called

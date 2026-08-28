@@ -55,6 +55,7 @@ type RetrievedChunk struct {
 	ChunkIndex int     `json:"chunk_index"`
 	Content    string  `json:"content"`
 	Distance   float64 `json:"distance"`
+	Score      float64 `json:"score"`
 }
 
 // errResult builds a failure Result.
