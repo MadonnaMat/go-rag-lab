@@ -150,6 +150,42 @@ func TestWeb_CompactIndicatorClick(t *testing.T) {
 	assert.Equal(t, "/compact", last.Content)
 }
 
+// TestWeb_CompactionNotice proves a /compact turn renders as a centered
+// divider notice carrying the summary — not an empty chat bubble.
+func TestWeb_CompactionNotice(t *testing.T) {
+	requireChrome(t)
+
+	chatter := &fakeChatter{events: []chat.Event{
+		{Type: chat.EventCompacting},
+		{Type: chat.EventCompacted, Summary: "Earlier turns covered ulmarin biology and diet."},
+		{Type: chat.EventContextUsage, UsedTokens: 200, ContextTokens: 1000},
+		{Type: chat.EventDone},
+	}}
+	srv := httptest.NewServer(NewRouter(&Handler{Chatter: chatter}))
+	defer srv.Close()
+
+	ctx, cancel := context.WithTimeout(newChromedpContext(t), 60*time.Second)
+	defer cancel()
+
+	var noticeText string
+	var bubbleCount int
+	err := chromedp.Run(ctx,
+		chromedp.Navigate(srv.URL+"/"),
+		chromedp.WaitVisible("#chat-input", chromedp.ByQuery),
+		chromedp.SendKeys("#chat-input", "/compact", chromedp.ByQuery),
+		chromedp.Click("#chat-send", chromedp.ByQuery),
+		chromedp.WaitEnabled("#chat-input", chromedp.ByQuery),
+		chromedp.WaitVisible(".compaction-notice", chromedp.ByQuery),
+		chromedp.Text(".compaction-notice", &noticeText, chromedp.ByQuery),
+		chromedp.Evaluate(`document.querySelectorAll('#messages .message').length`, &bubbleCount),
+	)
+	require.NoError(t, err)
+
+	assert.Contains(t, noticeText, "Context compacted")
+	assert.Contains(t, noticeText, "ulmarin biology and diet")
+	assert.Equal(t, 0, bubbleCount, "a /compact turn renders no chat bubbles (x-if, not just hidden)")
+}
+
 // TestWeb_SourceDrawer proves the "sources" frame renders clickable chips
 // under the answer, and clicking one opens the drawer with the .md rendered
 // and its cited passage highlighted.

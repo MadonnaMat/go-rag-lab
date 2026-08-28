@@ -37,10 +37,18 @@ function chatApp() {
       const text = this.input.trim();
       if (!text || this.streaming) return;
       this.input = "";
-      this.messages.push({ role: "user", content: text, status: "", sources: [] });
+      this.pushUser(text);
+      this.runTurn();
+    },
+
+    // A "/compact" message (typed here or sent by the context indicator)
+    // gets kind:"compaction" so the turn renders as a centered divider
+    // notice instead of a chat bubble + empty reply.
+    pushUser(text) {
+      const kind = text === "/compact" ? "compaction" : undefined;
+      this.messages.push({ role: "user", content: text, kind, status: "", sources: [] });
       this.stick = true; // a fresh send always follows the conversation down
       this.scrollDown();
-      this.runTurn();
     },
 
     // Keep the transcript pinned to the bottom as replies stream in, but
@@ -65,9 +73,7 @@ function chatApp() {
     // server-side path as a user typing /compact themselves.
     compact() {
       if (this.streaming || this.contextTokens === null) return;
-      this.messages.push({ role: "user", content: "/compact", status: "", sources: [] });
-      this.stick = true;
-      this.scrollDown();
+      this.pushUser("/compact");
       this.runTurn();
     },
 
@@ -84,7 +90,16 @@ function chatApp() {
       // so later mutations must go through this.messages[idx], never a
       // held reference to the plain object, or they won't trigger a
       // re-render.
-      const idx = this.messages.push({ role: "assistant", content: "", status: "", sources: [] }) - 1;
+      // A compaction turn's reply is the summary notice, not a chat bubble.
+      const compaction = this.messages[this.messages.length - 1]?.kind === "compaction";
+      const idx =
+        this.messages.push({
+          role: "assistant",
+          content: "",
+          kind: compaction ? "compaction" : undefined,
+          status: "",
+          sources: [],
+        }) - 1;
 
       try {
         const resp = await fetch("/chat", {
@@ -182,11 +197,19 @@ function chatApp() {
           break;
         }
         case "compacting":
-          this.setStatus(idx, "Summarizing earlier conversation…");
+          if (assistantMsg.kind === "compaction") assistantMsg.content = "Compacting the conversation…";
+          else this.setStatus(idx, "Summarizing earlier conversation…");
           break;
-        case "compacted":
-          this.setStatus(idx, data.summary ? `Compacted: ${data.summary}` : "Compacted.");
+        case "compacted": {
+          const s = data.summary || "";
+          const noop = !s || s === "nothing to compact";
+          if (assistantMsg.kind === "compaction") {
+            assistantMsg.content = noop ? "Nothing to compact." : `Context compacted — ${s}`;
+          } else {
+            this.setStatus(idx, noop ? "Nothing to compact." : `Compacted: ${s}`);
+          }
           break;
+        }
         case "verifying":
           this.setStatus(idx, "Double-checking the answer…");
           break;
@@ -209,6 +232,8 @@ function chatApp() {
           this.errorMessage = data.error || "unknown error";
           break;
         case "done":
+          // A compaction turn's notice already carries its final text.
+          if (assistantMsg.kind === "compaction") break;
           // Show "Done!" briefly, then clear the status line on its own.
           this.setStatus(idx, "Done!");
           setTimeout(() => this.setStatus(idx, ""), 2000);

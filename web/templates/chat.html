@@ -38,35 +38,46 @@
     <main id="messages" class="flex-1 space-y-4 overflow-y-auto px-4 py-4" @scroll="onScroll()">
       <template x-for="(m, i) in messages" :key="i">
         <div>
-          <div
-            class="message max-w-[85%] rounded-lg px-3 py-2 whitespace-pre-wrap"
-            :data-role="m.role"
-            :class="m.role === 'user' ? 'ml-auto bg-sky-700' : 'bg-slate-800'"
-            x-text="m.content"
-          ></div>
-          <!-- Single status line for the in-progress assistant turn: tool
-               calls/results, thinking, compacting, verifying, then a
-               closing "Done!" — every phase where the model is doing
-               something with no visible answer text yet. Replaced in
-               place, not accumulated, and cleared a couple seconds after
-               "Done!" shows. -->
-          <p
-            x-show="m.role === 'assistant' && m.status"
-            x-text="m.status"
-            class="status mt-1 text-xs italic text-slate-400"
-          ></p>
-          <!-- Documents the answer drew on (sources SSE frame). Clicking a
-               chip opens the drawer with that .md rendered and the cited
-               passages highlighted. -->
-          <div
-            x-show="m.role === 'assistant' && m.sources && m.sources.length"
-            class="sources mt-1 flex flex-wrap items-center gap-1 text-xs"
-          >
-            <span class="text-slate-500">Sources:</span>
-            <template x-for="s in m.sources" :key="s.file">
-              <button type="button" class="source-chip" @click="openSource(s)" x-text="s.file"></button>
-            </template>
-          </div>
+          <!-- A /compact turn renders as a centered divider notice carrying
+               the compaction summary, in place of the user bubble + reply.
+               The user's own "/compact" message renders nothing. -->
+          <template x-if="m.kind === 'compaction' && m.role === 'assistant'">
+            <p x-text="m.content" class="compaction-notice"></p>
+          </template>
+
+          <template x-if="!m.kind">
+            <div>
+              <div
+                class="message max-w-[85%] rounded-lg px-3 py-2 whitespace-pre-wrap"
+                :data-role="m.role"
+                :class="m.role === 'user' ? 'ml-auto bg-sky-700' : 'bg-slate-800'"
+                x-text="m.content"
+              ></div>
+              <!-- Single status line for the in-progress assistant turn: tool
+                   calls/results, thinking, compacting, verifying, then a
+                   closing "Done!" — every phase where the model is doing
+                   something with no visible answer text yet. Replaced in
+                   place, not accumulated, and cleared a couple seconds after
+                   "Done!" shows. -->
+              <p
+                x-show="m.role === 'assistant' && m.status"
+                x-text="m.status"
+                class="status mt-1 text-xs italic text-slate-400"
+              ></p>
+              <!-- Documents the answer drew on (sources SSE frame). Clicking
+                   a chip opens the drawer with that .md rendered and the
+                   cited passages highlighted. -->
+              <div
+                x-show="m.role === 'assistant' && m.sources && m.sources.length"
+                class="sources mt-1 flex flex-wrap items-center gap-1 text-xs"
+              >
+                <span class="text-slate-500">Sources:</span>
+                <template x-for="s in m.sources" :key="s.file">
+                  <button type="button" class="source-chip" @click="openSource(s)" x-text="s.file"></button>
+                </template>
+              </div>
+            </div>
+          </template>
         </div>
       </template>
     </main>

@@ -39,6 +39,24 @@
   color: #f1f5f9;
 }
 
+/* --- Compaction notice (a /compact turn) ----------------------------- */
+
+.compaction-notice {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin: 0.25rem auto;
+  font-size: 0.75rem;
+  font-style: italic;
+  color: #94a3b8; /* slate-400 */
+}
+.compaction-notice::before,
+.compaction-notice::after {
+  content: "";
+  flex: 1;
+  border-top: 1px solid #334155; /* slate-700 */
+}
+
 /* --- Drawer -------------------------------------------------------------- */
 
 .drawer-backdrop {
