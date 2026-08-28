@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>go-rag-lab chat</title>
   <link rel="stylesheet" href="/static/tailwind.css">
+  <link rel="stylesheet" href="/static/app.css">
   <script src="/static/htmx.min.js"></script>
   <script src="/static/alpine.min.js" defer></script>
 </head>
@@ -54,9 +55,34 @@
             x-text="m.status"
             class="status mt-1 text-xs italic text-slate-400"
           ></p>
+          <!-- Documents the answer drew on (sources SSE frame). Clicking a
+               chip opens the drawer with that .md rendered and the cited
+               passages highlighted. -->
+          <div
+            x-show="m.role === 'assistant' && m.sources && m.sources.length"
+            class="sources mt-1 flex flex-wrap items-center gap-1 text-xs"
+          >
+            <span class="text-slate-500">Sources:</span>
+            <template x-for="s in m.sources" :key="s.file">
+              <button type="button" class="source-chip" @click="openSource(s)" x-text="s.file"></button>
+            </template>
+          </div>
         </div>
       </template>
     </main>
+
+    <!-- Source drawer: slides in from the right, ~70% width. -->
+    <div class="drawer-backdrop" x-show="drawer.open" @click="closeDrawer()" x-transition.opacity x-cloak></div>
+    <aside class="drawer" :class="{ 'drawer-open': drawer.open }" x-cloak>
+      <header class="drawer-head">
+        <span class="truncate font-medium" x-text="drawer.file"></span>
+        <button type="button" @click="closeDrawer()" aria-label="Close" class="drawer-close">&times;</button>
+      </header>
+      <div class="drawer-body">
+        <p x-show="drawer.loading" class="text-sm text-slate-400">Loading&hellip;</p>
+        <article class="markdown-body" x-show="!drawer.loading" x-html="drawer.html"></article>
+      </div>
+    </aside>
 
     <footer class="border-t border-slate-800 p-4">
       <form id="chat-form" @submit.prevent="send()" class="flex gap-2">

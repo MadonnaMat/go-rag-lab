@@ -1,0 +1,174 @@
+/* Hand-written styles for the source drawer and the rendered-markdown
+   "page" inside it. Kept as plain CSS (not Tailwind utilities) because the
+   frontend has no Tailwind build step — tailwind.css is a committed,
+   hand-curated subset and these classes/animation aren't in it. */
+
+[x-cloak] {
+  display: none !important;
+}
+
+/* --- Drawer -------------------------------------------------------------- */
+
+.drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background: rgba(0, 0, 0, 0.5);
+}
+
+.drawer {
+  position: fixed;
+  inset: 0 0 0 auto;
+  z-index: 50;
+  display: flex;
+  width: 70%;
+  max-width: 70%;
+  flex-direction: column;
+  background: #1e293b; /* slate-800 */
+  box-shadow: -8px 0 24px rgba(0, 0, 0, 0.45);
+  transform: translateX(100%);
+  transition: transform 0.3s ease;
+}
+
+.drawer-open {
+  transform: translateX(0);
+}
+
+@media (max-width: 640px) {
+  .drawer,
+  .drawer.drawer-open {
+    width: 100%;
+    max-width: 100%;
+  }
+}
+
+.drawer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid #334155; /* slate-700 */
+  color: #e2e8f0;
+}
+
+.drawer-close {
+  font-size: 1.25rem;
+  line-height: 1;
+  color: #94a3b8;
+  padding: 0 0.25rem;
+}
+.drawer-close:hover {
+  color: #e2e8f0;
+}
+
+/* The muted "desk" the page sits on. */
+.drawer-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 2rem 1rem;
+  background: #334155; /* slate-700 */
+}
+
+/* --- The rendered document, styled as a sheet of letter paper ---------- */
+
+.markdown-body {
+  max-width: 8.5in;
+  margin: 0 auto;
+  padding: 3rem 3.5rem;
+  background: #f8fafc;
+  color: #1e293b;
+  border-radius: 2px;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.35);
+  line-height: 1.65;
+}
+
+@media (max-width: 640px) {
+  .markdown-body {
+    padding: 1.75rem 1.25rem;
+  }
+}
+
+.markdown-body > :first-child {
+  margin-top: 0;
+}
+.markdown-body h1,
+.markdown-body h2,
+.markdown-body h3,
+.markdown-body h4 {
+  font-weight: 600;
+  line-height: 1.25;
+  margin: 1.8em 0 0.6em;
+}
+.markdown-body h1 {
+  font-size: 1.7rem;
+}
+.markdown-body h2 {
+  font-size: 1.35rem;
+}
+.markdown-body h3 {
+  font-size: 1.15rem;
+}
+.markdown-body p,
+.markdown-body ul,
+.markdown-body ol,
+.markdown-body blockquote,
+.markdown-body table {
+  margin: 0 0 1em;
+}
+.markdown-body ul,
+.markdown-body ol {
+  padding-left: 1.5em;
+}
+.markdown-body li {
+  margin: 0.25em 0;
+}
+.markdown-body a {
+  color: #1d4ed8;
+  text-decoration: underline;
+}
+.markdown-body blockquote {
+  border-left: 3px solid #cbd5e1;
+  padding-left: 1em;
+  color: #475569;
+}
+.markdown-body code {
+  background: #e2e8f0;
+  border-radius: 3px;
+  padding: 0.1em 0.35em;
+  font-size: 0.9em;
+}
+.markdown-body pre {
+  background: #e2e8f0;
+  border-radius: 4px;
+  padding: 0.9em 1em;
+  overflow-x: auto;
+  margin: 0 0 1em;
+}
+.markdown-body pre code {
+  background: none;
+  padding: 0;
+}
+.markdown-body table {
+  border-collapse: collapse;
+}
+.markdown-body th,
+.markdown-body td {
+  border: 1px solid #cbd5e1;
+  padding: 0.4em 0.7em;
+}
+
+/* Cited blocks: the passages the answer drew on, shaded like a highlighter
+   swipe down the margin of a printed page. Highlighting is block-level (a
+   whole paragraph/heading/list) so it stays valid even when a retrieved
+   chunk starts or ends mid-block. */
+.markdown-body .cited {
+  background: #fef3c7; /* amber-100 */
+  box-shadow:
+    -0.6rem 0 0 #fef3c7,
+    0.6rem 0 0 #fef3c7;
+  border-left: 3px solid #f59e0b; /* amber-500 */
+  padding-left: 0.6rem;
+  margin-left: -0.6rem;
+  scroll-margin-top: 2rem;
+}

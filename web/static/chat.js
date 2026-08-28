@@ -7,12 +7,15 @@
 // declarative markup on this page; it isn't doing the streaming.
 function chatApp() {
   return {
-    messages: [], // {role, content, status: ""}
+    messages: [], // {role, content, status: "", sources: []}
     input: "",
     streaming: false,
     errorMessage: "",
     usedTokens: 0,
     contextTokens: null,
+    // Source drawer: shows one lore .md rendered server-side, cited passages
+    // highlighted. file/chunks come from the "sources" SSE frame.
+    drawer: { open: false, file: "", html: "", loading: false },
 
     usagePercent() {
       if (!this.contextTokens) return 0;
@@ -30,7 +33,7 @@ function chatApp() {
       const text = this.input.trim();
       if (!text || this.streaming) return;
       this.input = "";
-      this.messages.push({ role: "user", content: text, status: "" });
+      this.messages.push({ role: "user", content: text, status: "", sources: [] });
       this.runTurn();
     },
 
@@ -38,7 +41,7 @@ function chatApp() {
     // server-side path as a user typing /compact themselves.
     compact() {
       if (this.streaming || this.contextTokens === null) return;
-      this.messages.push({ role: "user", content: "/compact", status: "" });
+      this.messages.push({ role: "user", content: "/compact", status: "", sources: [] });
       this.runTurn();
     },
 
@@ -55,7 +58,7 @@ function chatApp() {
       // so later mutations must go through this.messages[idx], never a
       // held reference to the plain object, or they won't trigger a
       // re-render.
-      const idx = this.messages.push({ role: "assistant", content: "", status: "" }) - 1;
+      const idx = this.messages.push({ role: "assistant", content: "", status: "", sources: [] }) - 1;
 
       try {
         const resp = await fetch("/chat", {
@@ -171,6 +174,11 @@ function chatApp() {
           this.usedTokens = data.used_tokens || 0;
           this.contextTokens = data.context_tokens || null;
           break;
+        case "sources":
+          // Mutate through this.messages[idx], not a held reference — same
+          // reactivity requirement runTurn's comment explains.
+          this.messages[idx].sources = Array.isArray(data.sources) ? data.sources : [];
+          break;
         case "error":
           this.errorMessage = data.error || "unknown error";
           break;
@@ -182,6 +190,35 @@ function chatApp() {
         default:
           break;
       }
+    },
+
+    // Opens the drawer for one source: fetches the .md rendered to HTML
+    // (with the cited blocks already tagged class="cited" server-side),
+    // then scrolls the first highlighted block into view.
+    async openSource(s) {
+      this.drawer = { open: true, file: s.file, html: "", loading: true };
+      const params = (s.chunk_indices || []).map((i) => "chunks=" + i).join("&");
+      try {
+        const resp = await fetch("/lore/" + encodeURIComponent(s.file) + (params ? "?" + params : ""));
+        if (!resp.ok) throw new Error(`request failed: ${resp.status}`);
+        const data = await resp.json();
+        this.drawer.html = data.html || "";
+      } catch (err) {
+        this.drawer.html =
+          '<p style="color:#b91c1c">Could not load this document: ' +
+          (err && err.message ? err.message : String(err)) +
+          "</p>";
+      } finally {
+        this.drawer.loading = false;
+      }
+      this.$nextTick(() => {
+        const first = this.$root.querySelector(".drawer-body .cited");
+        if (first) first.scrollIntoView({ block: "center" });
+      });
+    },
+
+    closeDrawer() {
+      this.drawer.open = false;
     },
 
     // Replaces the single status line for the assistant message at idx —

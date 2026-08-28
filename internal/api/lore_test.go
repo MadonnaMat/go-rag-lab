@@ -23,12 +23,12 @@ func TestRenderLoreHTML(t *testing.T) {
 		require.NoError(t, err)
 		assert.Contains(t, html, "<h1>Title</h1>")
 		assert.Contains(t, html, "<strong>first</strong>")
-		assert.NotContains(t, html, "<mark")
+		assert.NotContains(t, html, "cited")
 	})
 
-	t.Run("wraps a requested chunk's text in mark.cited", func(t *testing.T) {
-		// Small chunks so a single chunk covers just part of the doc.
-		chunks, err := chunk.Split(md, 40, 10)
+	t.Run("tags the block a requested chunk covers with class=cited", func(t *testing.T) {
+		const spaced = "# Title\n\nThe first paragraph mentions quetzalcoatlus here and runs on for a while so its chunk stays within it.\n\nA clearly separate second paragraph, far away.\n"
+		chunks, err := chunk.Split(spaced, 60, 5)
 		require.NoError(t, err)
 		var withQ int
 		for i, c := range chunks {
@@ -37,17 +37,17 @@ func TestRenderLoreHTML(t *testing.T) {
 			}
 		}
 
-		html, err := renderLoreHTML([]byte(md), []int{withQ}, 40, 10)
+		html, err := renderLoreHTML([]byte(spaced), []int{withQ}, 60, 5)
 		require.NoError(t, err)
-		assert.Contains(t, html, `<mark class="cited">`)
-		assert.Contains(t, html, "</mark>")
-		assert.Contains(t, html, "quetzalcoatlus")
+		assert.Regexp(t, `<p class="cited">[^<]*quetzalcoatlus`, html)
+		assert.NotContains(t, html, `<p class="cited">A clearly separate`,
+			"a block the chunk doesn't reach should not be tagged")
 	})
 
 	t.Run("ignores out-of-range indices", func(t *testing.T) {
 		html, err := renderLoreHTML([]byte(md), []int{99}, 1000, 200)
 		require.NoError(t, err)
-		assert.NotContains(t, html, "<mark")
+		assert.NotContains(t, html, "cited")
 	})
 
 	t.Run("strips dangerous markup", func(t *testing.T) {
@@ -56,19 +56,14 @@ func TestRenderLoreHTML(t *testing.T) {
 		assert.NotContains(t, html, "<script")
 	})
 
-	t.Run("merges overlapping highlight ranges into balanced marks", func(t *testing.T) {
-		chunks, err := chunk.Split(md, 40, 20)
+	t.Run("a chunk spanning several blocks tags each of them, HTML stays valid", func(t *testing.T) {
+		// One big chunk covering the whole doc.
+		html, err := renderLoreHTML([]byte(md), []int{0}, 1000, 200)
 		require.NoError(t, err)
-		require.GreaterOrEqual(t, len(chunks), 2)
-
-		all := make([]int, len(chunks))
-		for i := range chunks {
-			all[i] = i
-		}
-		html, err := renderLoreHTML([]byte(md), all, 40, 20)
-		require.NoError(t, err)
-		assert.Equal(t, strings.Count(html, `<mark class="cited">`), strings.Count(html, "</mark>"),
-			"every opening mark should have a matching close")
+		assert.Contains(t, html, `<h1 class="cited">`)
+		assert.Contains(t, html, `<p class="cited">`)
+		// No stray unclosed inline highlight tags.
+		assert.NotContains(t, html, "<mark")
 	})
 }
 
